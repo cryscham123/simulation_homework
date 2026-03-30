@@ -1,0 +1,60 @@
+name: Render and Upload to Google Drive
+on:
+  push:
+    branches: [ master ]
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas simpy jupyter nbformat nbconvert
+
+      - name: Set up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Render Quarto to IPYNB
+        run: |
+          quarto render simul.qmd --to ipynb
+
+      - name: Update to Google Drive
+        env:
+          CLIENT_ID: ${{ secrets.DRIVE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.DRIVE_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
+          FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          FILENAME: "simul.ipynb"
+        run: |
+          ACCESS_TOKEN=$(curl -s -X POST https://oauth2.googleapis.com/token \
+            -d client_id=$CLIENT_ID \
+            -d client_secret=$CLIENT_SECRET \
+            -d refresh_token=$REFRESH_TOKEN \
+            -d grant_type=refresh_token | jq -r .access_token)
+
+          EXISTING_FILE_ID=$(curl -s -G "https://www.googleapis.com/drive/v3/files" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            --data-urlencode "q='${FOLDER_ID}' in parents and name='${FILENAME}' and trashed=false" \
+            | jq -r '.files[0].id // empty')
+
+          if [ -z "$EXISTING_FILE_ID" ]; then
+            echo "기존 파일 없음: 신규 업로드 진행"
+            curl -X POST "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -F "metadata={name : '$FILENAME', parents : ['$FOLDER_ID']};type=application/json;charset=UTF-8" \
+              -F "file=@$FILENAME;type=application/x-ipynb+json"
+          else
+            echo "기존 파일 발견 (ID: $EXISTING_FILE_ID): 덮어쓰기 진행"
+            curl -X PATCH "https://www.googleapis.com/upload/drive/v3/files/$EXISTING_FILE_ID?uploadType=media" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Content-Type: application/x-ipynb+json" \
+              --data-binary "@$FILENAME"
+          fi

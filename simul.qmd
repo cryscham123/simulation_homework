@@ -1,0 +1,187 @@
+---
+title: 시뮬레이션 환경
+---
+
+```{python}
+import pandas as pd
+
+machine_df = pd.read_csv('data/machines.csv')
+jobs_df = pd.read_csv('data/jobs.csv')
+machine_failure_df = pd.read_csv('data/machine_failure.csv')
+op_machine_df = pd.read_csv('data/operation_machine_map.csv')
+operations_df = pd.read_csv('data/operations.csv')
+setup_times_df = pd.read_csv('data/setup_times.csv')
+```
+
+## 시뮬레이션 환경
+
+```{python}
+import simpy
+import random
+
+# 아래 변수는 알아서 커스텀 해서 쓰시오.
+SIMUL_TIME = 1000
+# PM 구현하면서 궁금해진 것
+# 1. PM을 진행하는 자원은 무한한가?
+# 2. PM 시간은 매번 같아야 하나?
+# 일단 PM은 고려 x
+PM_THRESHOLD = 50
+
+class Machine:
+    def __init__(self, env, id, group, failure_info, setup_time_info, process_time_info):
+        self.__env = env
+        self.__id = id
+        self.group = group
+        # 가정: Machine은 한 번에 하나의 작업만 처리할 수 있다.
+        self.resource = simpy.PreemptiveResource(env, capacity=1)
+        self.__base_hazard = failure_info['base_hazard']
+        self.__hazard_increase_rate = failure_info['hazard_increase_rate']
+        self.__repair_time = failure_info['repair_time']
+        self.__pm_duration = failure_info['pm_duration']
+        self.__setup_times = setup_time_info
+        self.__process_times = process_time_info
+        self.__is_repaired = True
+        env.process(self.__breakdown())
+
+        # Machine 상태
+        self.__last_repair_time = 0.0
+        self.__last_job_type = None
+
+    def __breakdown(self):
+        while True:
+            # 아직 재대로 반영 안됐다.
+            lam = self.__base_hazard + \
+                self.__hazard_increase_rate * \
+                    (self.__env.now - self.__last_repair_time)
+            yield self.__env.timeout(random.expovariate(lam))
+            if not self.__is_repaired:
+                continue
+            self.__is_repaired = False
+            with self.resource.request(priority=-1, preempt=True) as req:
+                yield req
+                print(f'{round(self.__env.now, 2)}\tMachine {self.__id} broke down')
+                yield self.__env.process(self.__repair())
+            self.__is_repaired = True
+
+    def __repair(self):
+        yield self.__env.timeout(self.__repair_time)
+        self.__last_repair_time = self.__env.now
+        # 고장 나면 setup 정보 초기화
+        self.__last_job_type = None
+        print(f'{round(self.__env.now, 2)}\tMachine {self.__id} repaired')
+
+    def is_idle(self):
+        return self.resource.count < self.resource.capacity
+
+    def get_setup_time(self, job_type):
+        # 이전 작업이 없을 경우 setup time은 없다고 가정
+        if self.__last_job_type is None or job_type == self.__last_job_type:
+            return 0
+        setup_time = self.__setup_times[
+            (setup_times_df['from_job_type'] == self.__last_job_type) &
+            (setup_times_df['to_job_type'] == job_type)
+        ]['setup_time'].iloc[0]
+        return setup_time
+
+    def get_process_time(self, op_id):
+        return self.__process_times[self.__process_times['op_id'] == op_id]['process_time'].iloc[0]
+
+    def setup(self, job_type):
+        yield self.__env.timeout(self.get_setup_time(job_type)) 
+        self.__last_job_type = job_type
+
+    def work(self, op_id):
+        yield self.__env.timeout(self.get_process_time(op_id))
+```
+
+```{python}
+class Scheduler:
+    def __init__(self, env, machine_df, operations_df, machine_failure_df, setup_times_df, op_machine_df):
+        self.__machine_store = {group: simpy.FilterStore(env, capacity=float('inf')) for group in machine_df['machine_group'].unique()}
+        for id, group in machine_df.set_index('machine_id').iterrows():
+            machine = Machine(env, 
+                              id,
+                              group.values[0],
+                              machine_failure_df[machine_failure_df['machine_id'] == id].iloc[0],
+                              setup_times_df[setup_times_df['machine_group'] == group['machine_group']],
+                              op_machine_df[op_machine_df['machine_id'] == id]) 
+            self.__machine_store[group['machine_group']].put(machine)
+        self.__op_table = operations_df.sort_values(['job_id', 'op_seq']).set_index(['job_id', 'op_seq'])
+
+    def get_matched_machine(self, job_id, op_seq):
+        op_group = self.__op_table.loc[(job_id, op_seq), 'op_group']
+        target = yield self.__machine_store[op_group].get(lambda x: x.is_idle())
+        return target
+
+    def put_back_machine(self, machine):
+        self.__machine_store[machine.group].put(machine)
+```
+
+```{python}
+class Job:
+    def __init__(self, env, job_info, op_info, scheduler):
+        self.__env = env
+        self.__id = job_info['job_id']
+        self.__type = job_info['job_type']
+        self.__release_time = job_info['release_time']
+        self.__due_date = job_info['due_date']
+        self.__priority = job_info['priority']
+        self.__qtime = op_info['qtime'].values
+        self.__op_seq = op_info[['op_id', 'op_seq']].values
+        self.__scheduler = scheduler
+        self.__qtime_start = 0.0
+        self.__job_process = env.process(self.run())
+        self.__sub_process = None
+        self.__cur_machine = None
+
+    def __chk_qtime(self, seq):
+        try:
+            self.__qtime_start = self.__env.now
+            yield self.__env.timeout(self.__qtime[seq - 1])
+            self.__job_process.interrupt()
+        except simpy.Interrupt:
+            pass
+
+    def run(self):
+        yield self.__env.timeout(self.__release_time)
+        try:
+            for op_id, seq in self.__op_seq:
+                qtime_process = self.__env.process(self.__chk_qtime(seq))
+                # 가용 가능한 machine random하게 선택
+                self.__cur_machine = yield self.__env.process(self.__scheduler.get_matched_machine(self.__id, seq))
+                with self.__cur_machine.resource.request(priority=self.__priority, preempt=False) as req:
+                    yield req
+                    print(f'{round(self.__env.now, 2)}\tJob {self.__id} starts setup for operation {op_id} on machine {self.__cur_machine._Machine__id}')
+                    self.__sub_process = self.__env.process(self.__cur_machine.setup(self.__type))
+                    qtime_process.interrupt()
+                    print(f'{round(self.__env.now, 2)}\tJob {self.__id} starts processing operation {op_id} on machine {self.__cur_machine._Machine__id}')
+                    self.__sub_process = self.__env.process(self.__cur_machine.work(op_id))
+                    print(f'{round(self.__env.now, 2)}\tJob {self.__id} finished operation {op_id} on machine {self.__cur_machine._Machine__id}')
+                    self.__scheduler.put_back_machine(self.__cur_machine)
+                    self.__cur_machine = None
+                    self.__sub_process = None
+        except simpy.Interrupt:
+            print(f'{round(self.__env.now, 2)}\tJob {self.__id} discarded')
+            if self.__sub_process:
+                self.__sub_process.interrupt()
+            if self.__cur_machine:
+                self.__scheduler.put_back_machine(self.__cur_machine)
+            # setup 중 qtime 초과시 setup은 마저 진행하는 로직 필요
+```
+
+```{python}
+env = simpy.Environment()
+scheduler = Scheduler(env, 
+                      machine_df, 
+                      operations_df, 
+                      machine_failure_df, 
+                      setup_times_df, 
+                      op_machine_df)
+
+for _, job_info in jobs_df.iterrows():
+    job = Job(env, 
+             job_info, 
+             operations_df.loc[operations_df['job_id'] == job_info['job_id'], ['op_id', 'op_seq', 'qtime']].sort_values('op_seq'),
+             scheduler)
+env.run(until=SIMUL_TIME)
+```
