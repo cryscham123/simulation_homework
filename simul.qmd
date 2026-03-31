@@ -24,7 +24,7 @@ SIMUL_TIME = 1000
 # PM 구현하면서 궁금해진 것
 # 1. PM을 진행하는 자원은 무한한가?
 # 2. PM 시간은 매번 같아야 하나?
-# 일단 PM은 고려
+# 일단 PM은 고
 PM_THRESHOLD = 50
 
 class Machine:
