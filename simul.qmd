@@ -19,7 +19,7 @@ setup_times_df = pd.read_csv('data/setup_times.csv')
 import simpy
 import random
 
-# 아래 변수는 알아서 커스텀 해서 쓰
+# 아래 변수는 알아서 커스텀 해서
 SIMUL_TIME = 1000
 # PM 구현하면서 궁금해진 것
 # 1. PM을 진행하는 자원은 무한한가?
