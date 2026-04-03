@@ -1,5 +1,6 @@
 import simpy
 import random
+import math
 import pandas as pd
 from typing import Dict, Any
 
@@ -50,16 +51,25 @@ class Machine:
         """머신 ID 반환"""
         return self.__id
 
+    def __calculate_hazard(self):
+        # h(t) = h0 + hr*t (시간에 따라 증가하는 위험률)
+        # H(t) = h0*t + hr*t²/2 (누적 위험 함수)
+        # H(T) = -ln(U)를 만족하는 T를 계산 (U ~ Uniform(0,1))
+        # h0*T + hr*T²/2 = -ln(U)
+        # 2차 방정식: hr*T²/2 + h0*T + ln(U) = 0
+        # 해: T = (-h0 + sqrt(h0² - 2*hr*ln(U))) / hr
+
+        h0 = self.__base_hazard
+        hr = self.__hazard_increase_rate
+        u = random.random()
+
+        return (-h0 + math.sqrt(h0**2 - 2*hr*math.log(u))) / hr
+
+
     def __breakdown(self):
         """머신 고장 프로세스"""
         while True:
-            # 시간이 지날 수록 고장률이 증가하는 로직
-            # 현재 의도대로 동작하지는 않는다. 추후 수정이 필요함.
-            lam = self.__base_hazard + \
-                self.__hazard_increase_rate * \
-                    (self.__env.now - self.__last_repair_time)
-
-            yield self.__env.timeout(random.expovariate(lam))
+            yield self.__env.timeout(self.__calculate_hazard())
 
             # 아직 수리가 안끝났는데 또 고장 이벤트가 발생하면 넘어감
             if not self.__is_repaired:
