@@ -48,9 +48,9 @@ class Machine:
 
         self.__resource = simpy.PreemptiveResource(env, capacity=1)
 
-        # 고장 관련 파라미터
-        self.__base_hazard = failure_info['base_hazard']
-        self.__hazard_increase_rate = failure_info['hazard_increase_rate']
+        # 고장 관련 파라미터 (Weibull 분포)
+        self.__shape = failure_info['shape parameter']
+        self.__scale = failure_info['scale parameter']
         self.__repair_time = failure_info['repair_time']
         self.__pm_duration = failure_info['pm_duration']
         self.__pm_hazard_threshold = pm_hazard_threshold
@@ -87,20 +87,16 @@ class Machine:
 
     def __calculate_hazard(self):
         """
-        기존 base.py에서 처리하던걸 다시 machine으로 이관.
-        csv 값을 통해 원하는 동작 처리 가능
+        Weibull 분포 기반 고장 발생 시간 샘플링.
         """
         if os.getenv('DOWN_ACTIVE', 'True').lower() == 'false':
             return inf
-        h0 = self.__base_hazard
-        hr = self.__hazard_increase_rate
+        k = self.__shape
+        lam = self.__scale
+        if k <= 0 or lam <= 0:
+            return inf
         u = random.random()
-
-        if hr > 0:
-            return (-h0 + math.sqrt((h0 ** 2) - 2 * hr * math.log(u))) / hr
-        if h0 > 0:
-            return -math.log(u) / h0
-        return inf
+        return lam * ((-math.log(u)) ** (1.0 / k))
 
     def down(self):
         """머신 중단 프로세스"""
@@ -116,18 +112,24 @@ class Machine:
         self.__event_queue.put(self)
 
     def __calculate_PM_time(self):
+        """
+        Weibull hazard h(t) = (k/λ)(t/λ)^(k-1)이 threshold에 도달하는 시점.
+        h(t) = thr → t = λ · (thr·λ/k)^(1/(k-1))
+        """
         if os.getenv('PM_ACTIVE', 'True').lower() == 'false':
             return inf
-        h0 = self.__base_hazard
-        hr = self.__hazard_increase_rate
+        k = self.__shape
+        lam = self.__scale
         thr = self.__pm_hazard_threshold
-        if hr > 0:
-            t_star = (-h0 + math.sqrt((h0 ** 2) + 2.0 * hr * thr)) / hr
-        elif h0 > 0:
-            t_star = thr / h0
-        else:
-            t_star = inf
-        return t_star
+        if k <= 0 or lam <= 0:
+            return inf
+        if k == 1:
+            # 지수 분포: hazard 상수 1/λ
+            return 0.0 if (1.0 / lam) >= thr else inf
+        if k < 1:
+            # 감소 hazard: 초기에 가장 높음
+            return 0.0
+        return lam * ((thr * lam / k) ** (1.0 / (k - 1)))
 
     def PM(self):
         """예방 보전 프로세스"""

@@ -6,7 +6,13 @@ class EventLogger:
     def __init__(self, env: simpy.Environment):
         self.__logs = []
         self.__env = env
-
+        
+    @property
+    def now(self):
+        TIME_UNIT = os.getenv('TIME_UNIT', 'M')
+        time_constants = {'M': 1, 'H': 60, 'D': 1440}
+        return self.__env.now / time_constants[TIME_UNIT]
+    
     @property
     def logs(self):
         TIME_UNIT = os.getenv('TIME_UNIT', 'M')

@@ -29,12 +29,17 @@ class DataLoader:
         data['operations'] = pd.read_csv(os.path.join(self.base_data_path, 'operations.csv'))
         data['setup_times'] = pd.read_csv(os.path.join(self.base_data_path, 'setup_times.csv'))
 
+        # Weibull 파라미터:
+        #   shape parameter: 무차원 (k) — 변환 불필요
+        #   scale parameter: 시간 단위 (λ) — 데이터가 분 단위이므로 시뮬레이션 내부 단위(분)와 일치, 변환 불필요
         DOWN_TIME_UNIT = os.getenv('DOWN_TIME_UNIT', 'M')
         time_constants = {
             'M': 1,
             'H': 60,
             'D': 60 * 24
         }
-        data['machine_failure'][['base_hazard', 'hazard_increase_rate']] = data['machine_failure'][['base_hazard', 'hazard_increase_rate']].apply(lambda x: x / time_constants[DOWN_TIME_UNIT])
+        data['machine_failure']['scale parameter'] = (
+            data['machine_failure']['scale parameter'] * time_constants[DOWN_TIME_UNIT]
+        )
 
         return data
