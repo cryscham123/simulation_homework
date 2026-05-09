@@ -2,18 +2,21 @@ import simpy
 import pandas as pd
 from .machine import Machine
 from utils import EventLogger
-from typing import Dict
+from typing import Dict, List, Optional
 from .job import Job
 from .stocker import Stocker
 
 class Scheduler:
     """시뮬레이션 환경의 스케줄러 클래스"""
 
-    def __init__(self, 
-                 env: simpy.Environment, 
-                 data: Dict[str, pd.DataFrame], 
-                 event_logger: EventLogger, 
-                 pm_hazard_threshold: float):
+    def __init__(self,
+                 env: simpy.Environment,
+                 data: Dict[str, pd.DataFrame],
+                 event_logger: EventLogger,
+                 pm_hazard_threshold: float,
+                 job_priority: Optional[List[str]] = None,
+                 op_machine: Optional[Dict[str, str]] = None,
+                 pm_thresholds: Optional[Dict[str, float]] = None):
         """
         Scheduler 초기화
 
@@ -22,8 +25,12 @@ class Scheduler:
             data: 시뮬레이션에 필요한 데이터 딕셔너리
             event_logger: 이벤트 기록 인스턴스
             pm_hazard_threshold: PM 고장 확률 임계값
+            job_priority: GA가 정한 job 투입 우선순위. None이면 데이터 순서.
+            op_machine: GA가 정한 op→머신 할당. None이면 룰 기반 매칭.
+            pm_thresholds: GA가 정한 머신별 PM threshold. None이면 글로벌 값 사용.
         """
         self.__env = env
+        self.__op_machine = op_machine
         self.__WIP = 0
         self.__machines = []
         self.machine_signal = simpy.Store(env, capacity=float('inf'))
@@ -51,6 +58,9 @@ class Scheduler:
                 op_machine_df['machine_id'] == machine_id
             ]
 
+            machine_threshold = (
+                pm_thresholds[machine_id] if pm_thresholds is not None else pm_hazard_threshold
+            )
             machine = Machine(
                 env=env,
                 id=machine_id,
@@ -58,7 +68,7 @@ class Scheduler:
                 failure_info=failure_info,
                 setup_time_info=setup_time_info,
                 process_time_info=process_time_info,
-                pm_hazard_threshold=pm_hazard_threshold,
+                pm_hazard_threshold=machine_threshold,
                 event_logger=event_logger,
                 event_queue=self.machine_events,
                 machine_signal=self.machine_signal,
@@ -74,7 +84,14 @@ class Scheduler:
 
         self.__jobs = []
         self.job_events = simpy.Store(env, capacity=float('inf'))
-        for _, job_info in data['jobs'].iterrows():
+
+        # GA 모드: 우선순위 순서로 job process 등록 (SimPy FIFO 활용)
+        if job_priority is not None:
+            jobs_df = data['jobs'].set_index('job_id').loc[job_priority].reset_index()
+        else:
+            jobs_df = data['jobs']
+
+        for _, job_info in jobs_df.iterrows():
             # 해당 작업의 operation 정보 가져오기
             job_operations = data['operations'].loc[
                 data['operations']['job_id'] == job_info['job_id'],
