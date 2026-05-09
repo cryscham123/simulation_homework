@@ -88,6 +88,7 @@ class Machine:
     def __calculate_hazard(self):
         """
         Weibull 분포 기반 고장 발생 시간 샘플링.
+        F(t) = 1 - exp(-(t/λ)^k) → t = λ · (-ln(u))^(1/k)
         """
         if os.getenv('DOWN_ACTIVE', 'True').lower() == 'false':
             return inf
@@ -113,8 +114,8 @@ class Machine:
 
     def __calculate_PM_time(self):
         """
-        Weibull hazard h(t) = (k/λ)(t/λ)^(k-1)이 threshold에 도달하는 시점.
-        h(t) = thr → t = λ · (thr·λ/k)^(1/(k-1))
+        Weibull 누적 고장 확률 F(t) = 1 - exp(-(t/λ)^k)이 threshold에 도달하는 시점.
+        F(t) = thr → t = λ · (-ln(1 - thr))^(1/k)
         """
         if os.getenv('PM_ACTIVE', 'True').lower() == 'false':
             return inf
@@ -123,13 +124,11 @@ class Machine:
         thr = self.__pm_hazard_threshold
         if k <= 0 or lam <= 0:
             return inf
-        if k == 1:
-            # 지수 분포: hazard 상수 1/λ
-            return 0.0 if (1.0 / lam) >= thr else inf
-        if k < 1:
-            # 감소 hazard: 초기에 가장 높음
+        if thr <= 0:
             return 0.0
-        return lam * ((thr * lam / k) ** (1.0 / (k - 1)))
+        if thr >= 1:
+            return inf
+        return lam * ((-math.log(1.0 - thr)) ** (1.0 / k))
 
     def PM(self):
         """예방 보전 프로세스"""

@@ -34,7 +34,7 @@ class Job:
         self.__due_date = job_info['due_date']
         self.__priority = job_info['priority']
         self.__qtime = op_info['qtime'].astype(float).values
-        self.__qtime[0] = float('inf') # 첫 번째 operation에 대한 qtime은 고려하지 않는다.
+        self.__qtime[self.__qtime <= 0] = float('inf')
         self.__op_seq = op_info[['op_id', 'op_seq']].values
         self.__op_group = op_info[['op_group', 'op_seq']].values
 
