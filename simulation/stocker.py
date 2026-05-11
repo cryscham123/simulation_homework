@@ -4,11 +4,10 @@ import os
 import random
 
 class Stocker():
-    def __init__(self, env, signal):
-        self.__env = env
+    def __init__(self, env, signal, op_machine=None):
         self.__resource = simpy.FilterStore(env, capacity=float('inf'))
         self.machine_end_signal = signal
-        self.__waiting_machines = simpy.FilterStore(env, capacity=float('inf'))
+        self.__op_machine = op_machine
         env.process(self.wait_until_machine_ready())
 
     def add_job(self, job: Job):
@@ -68,10 +67,18 @@ class Stocker():
         """
         while True:
             machine = yield self.machine_end_signal.get()
-            candidates = [
-                x for x in self.__resource.items
-                if x.get_op_group() == machine.group
-            ]
+            if self.__op_machine is not None:
+                # GA 모드: GA가 이 머신에 배정한 job들만 후보
+                candidates = [
+                    x for x in self.__resource.items
+                    if self.__op_machine[x.get_current_operation()] == machine.id
+                ]
+            else:
+                # 룰 기반: 같은 group이면 후보
+                candidates = [
+                    x for x in self.__resource.items
+                    if x.get_op_group() == machine.group
+                ]
             if len(candidates) == 0:
                 yield self.__waiting_machines.put(machine)
                 continue
