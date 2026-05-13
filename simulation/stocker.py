@@ -4,10 +4,14 @@ import os
 import random
 
 class Stocker():
-    def __init__(self, env, signal, op_machine=None):
+    def __init__(self, env, signal, op_machine=None, job_priority=None):
         self.__resource = simpy.FilterStore(env, capacity=float('inf'))
         self.machine_end_signal = signal
         self.__op_machine = op_machine
+        # job_id → 순위 인덱스. 낮을수록 우선. lookup O(1).
+        self.__job_priority = (
+            {jid: i for i, jid in enumerate(job_priority)} if job_priority is not None else None
+        )
         env.process(self.wait_until_machine_ready())
 
     def add_job(self, job: Job):
@@ -82,7 +86,11 @@ class Stocker():
             if len(candidates) == 0:
                 yield self.__waiting_machines.put(machine)
                 continue
-            rule = os.getenv('JOB_RULE', 'random')
-            best = self.__select_job(candidates, machine, rule)
+            if self.__job_priority is not None:
+                # GA 모드: 우선순위 인덱스가 낮은 job 선택
+                best = min(candidates, key=lambda j: self.__job_priority[j.id])
+            else:
+                rule = os.getenv('JOB_RULE', 'random')
+                best = self.__select_job(candidates, machine, rule)
             job = yield self.__resource.get(lambda x: x is best)
             self.__dispatch(job, machine)
