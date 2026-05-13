@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List
 import pandas as pd
 
 
@@ -29,15 +29,11 @@ class EncodedData:
     pm_levels: List[float]
 
 
-def encode(data: Dict[str, pd.DataFrame],
-           pm_levels: Optional[List[float]] = None) -> EncodedData:
+def encode(data: Dict[str, pd.DataFrame]) -> EncodedData:
     """시뮬레이션 데이터(DataFrame들)를 GA가 사용할 인덱스 테이블로 변환.
 
     GA 시작 시 1번 호출 후 모든 세대에서 재사용.
     """
-    if pm_levels is None:
-        pm_levels = list(DEFAULT_PM_LEVELS)
-
     # csv 등장 순서를 그대로 사용 → 결정론적
     job_index_table = data['jobs']['job_id'].tolist()
     machine_index_table = data['machines']['machine_id'].tolist()
@@ -63,5 +59,5 @@ def encode(data: Dict[str, pd.DataFrame],
         machine_index_table=machine_index_table,
         operation_index_table=operation_index_table,
         feasible_machine_table=feasible_machine_table,
-        pm_levels=pm_levels,
+        pm_levels=list(DEFAULT_PM_LEVELS),
     )
