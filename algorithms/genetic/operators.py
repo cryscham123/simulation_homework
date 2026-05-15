@@ -94,49 +94,49 @@ def _uniform_crossover(p1: List[int], p2: List[int]) -> Tuple[List[int], List[in
 
 def mutate(chromo: Chromosome,
            encoded: EncodedData,
-           rate: float = 0.1) -> Chromosome:
-    """각 부분 독립적으로 rate 확률로 변이. 새 Chromosome 반환 (원본 보존)."""
+           mut_job: float,
+           mut_machine: float,
+           mut_pm: float) -> Chromosome:
+    """파트별 per-gene 변이율 적용. 새 Chromosome 반환 (원본 보존)."""
     new_job = list(chromo.job_seq)
     new_mac = list(chromo.machine)
     new_pm = list(chromo.pm)
 
-    if random.random() < rate:
-        _swap_mutation(new_job)
-    if random.random() < rate:
-        _random_reset_machine(new_mac, encoded.feasible_machine_table)
-    if random.random() < rate:
-        _random_reset(new_pm, len(encoded.pm_levels))
+    _swap_mutation(new_job, mut_job)
+    _per_gene_reset(new_mac, mut_machine,
+                    lambda i: len(encoded.feasible_machine_table[i]))
+    _per_gene_reset(new_pm, mut_pm, lambda i: len(encoded.pm_levels))
 
     return Chromosome(job_seq=new_job, machine=new_mac, pm=new_pm)
 
 
-def _swap_mutation(seq: List[int]) -> None:
-    """두 위치를 무작위로 swap. 순열 보존."""
-    if len(seq) < 2:
+def _swap_mutation(seq: List[int], p: float) -> None:
+    """순열 보존. swap 횟수 k ~ Binomial(L, p)."""
+    L = len(seq)
+    if L < 2 or p <= 0:
         return
-    i, j = random.sample(range(len(seq)), 2)
-    seq[i], seq[j] = seq[j], seq[i]
+    k = sum(1 for _ in range(L) if random.random() < p)  # Binomial(L, p)
+    for _ in range(k):
+        i, j = random.sample(range(L), 2)
+        seq[i], seq[j] = seq[j], seq[i]
 
 
-def _random_reset_machine(genes: List[int],
-                           feasible_table: List[List[str]]) -> None:
-    """machine 유전자 한 위치를 다른 feasible 인덱스로 재설정."""
-    i = random.randrange(len(genes))
-    feasible_count = len(feasible_table[i])
-    if feasible_count < 2:
+def _per_gene_reset(genes: List[int],
+                    p: float,
+                    get_choice_count: Callable[[int], int]) -> None:
+    """각 위치 독립적으로 p 확률로 다른 값으로 재설정.
+
+    get_choice_count(i): 위치 i에서 가능한 후보 값의 개수.
+    """
+    if p <= 0:
         return
-    new_val = random.randrange(feasible_count)
-    while new_val == genes[i]:
-        new_val = random.randrange(feasible_count)
-    genes[i] = new_val
-
-
-def _random_reset(genes: List[int], n_values: int) -> None:
-    """일반 정수 유전자 한 위치를 다른 값으로 재설정."""
-    if n_values < 2:
-        return
-    i = random.randrange(len(genes))
-    new_val = random.randrange(n_values)
-    while new_val == genes[i]:
-        new_val = random.randrange(n_values)
-    genes[i] = new_val
+    for i in range(len(genes)):
+        if random.random() >= p:
+            continue
+        m = get_choice_count(i)
+        if m < 2:
+            continue
+        new_val = random.randrange(m)
+        while new_val == genes[i]:
+            new_val = random.randrange(m)
+        genes[i] = new_val
