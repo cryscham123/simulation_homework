@@ -2,6 +2,7 @@ import random
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
+from tqdm.auto import tqdm
 
 from .chromosome import Chromosome
 from .encoder import EncodedData
@@ -23,7 +24,9 @@ class GA:
                  pop_size: int,
                  n_generations: int,
                  crossover_rate: float,
-                 mutation_rate: float,
+                 mut_job: float,
+                 mut_machine: float,
+                 mut_pm: float,
                  tournament_k: int,
                  n_elites: int,
                  alpha: float,
@@ -35,7 +38,9 @@ class GA:
         self.pop_size = pop_size
         self.n_generations = n_generations
         self.crossover_rate = crossover_rate
-        self.mutation_rate = mutation_rate
+        self.mut_job = mut_job
+        self.mut_machine = mut_machine
+        self.mut_pm = mut_pm
         self.tournament_k = tournament_k
         self.n_elites = n_elites
         self.alpha = alpha
@@ -50,6 +55,8 @@ class GA:
 
     def run(self) -> Tuple[Chromosome, List[Dict[str, Any]]]:
         """GA 실행. (best_chromosome, history) 반환."""
+        gen_iter = tqdm(range(1, self.n_generations + 1), desc="GA", unit="gen")
+
         # 1. 초기 population 생성 + 평가
         population = [random_chromosome(self.encoded) for _ in range(self.pop_size)]
         for c in population:
@@ -61,7 +68,7 @@ class GA:
             self._print(history[-1])
 
         # 2. 세대 루프
-        for gen in range(1, self.n_generations + 1):
+        for gen in gen_iter:
             # 2-1. Elitism: 상위 n_elites개 그대로 보존
             elites = sorted(population, key=self.fitness_value)[:self.n_elites]
             children: List[Chromosome] = list(elites)
@@ -71,8 +78,8 @@ class GA:
                 p1 = tournament_select(population, self.fitness_value, self.tournament_k)
                 p2 = tournament_select(population, self.fitness_value, self.tournament_k)
                 c1, c2 = crossover(p1, p2, self.crossover_rate)
-                c1 = mutate(c1, self.encoded, self.mutation_rate)
-                c2 = mutate(c2, self.encoded, self.mutation_rate)
+                c1 = mutate(c1, self.encoded, self.mut_job, self.mut_machine, self.mut_pm)
+                c2 = mutate(c2, self.encoded, self.mut_job, self.mut_machine, self.mut_pm)
                 children.append(c1)
                 if len(children) < self.pop_size:
                     children.append(c2)
@@ -105,7 +112,7 @@ class GA:
         })
 
     def _print(self, record: Dict[str, Any]) -> None:
-        print(
+        tqdm.write(
             f"[Gen {record['gen']:3d}] "
             f"best_fitness={record['best_fitness']:.2f}  "
             f"makespan={record['best_makespan']:.2f}  "

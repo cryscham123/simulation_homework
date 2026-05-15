@@ -3,11 +3,6 @@ from typing import Dict, List
 import pandas as pd
 
 
-# PM threshold 후보 값. 작을수록 자주 PM(보수적), 클수록 늦게 PM(공격적).
-# 기존 시뮬레이션의 default(0.1, 0.2)를 가운데에 두고 양쪽으로 폭을 줌.
-DEFAULT_PM_LEVELS = [0.05, 0.1, 0.2, 0.5, 1.0]
-
-
 @dataclass
 class EncodedData:
     # job_seq 유전자가 가리키는 테이블. 예: ['J1', 'J2', 'J3', ...]
@@ -29,10 +24,13 @@ class EncodedData:
     pm_levels: List[float]
 
 
-def encode(data: Dict[str, pd.DataFrame]) -> EncodedData:
+def encode(data: Dict[str, pd.DataFrame], pm_levels: List[float]) -> EncodedData:
     """시뮬레이션 데이터(DataFrame들)를 GA가 사용할 인덱스 테이블로 변환.
 
     GA 시작 시 1번 호출 후 모든 세대에서 재사용.
+
+    - data: 시뮬레이션 데이터 딕셔너리 (jobs/machines/operations DataFrame)
+    - pm_levels: PM threshold 후보 값 리스트 (호출할 때 어떤 값을 쓸지 직접 정함)
     """
     # csv 등장 순서를 그대로 사용 → 결정론적
     job_index_table = data['jobs']['job_id'].tolist()
@@ -59,5 +57,5 @@ def encode(data: Dict[str, pd.DataFrame]) -> EncodedData:
         machine_index_table=machine_index_table,
         operation_index_table=operation_index_table,
         feasible_machine_table=feasible_machine_table,
-        pm_levels=list(DEFAULT_PM_LEVELS),
+        pm_levels=list(pm_levels),
     )
