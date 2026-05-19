@@ -35,6 +35,7 @@ class Job:
         self.__priority = job_info['priority']
         self.__qtime = op_info['qtime'].astype(float).values
         self.__qtime[self.__qtime <= 0] = float('inf')
+        self.__qtime[0] = float('inf')
         self.__op_seq = op_info[['op_id', 'op_seq']].values
         self.__op_group = op_info[['op_group', 'op_seq']].values
 

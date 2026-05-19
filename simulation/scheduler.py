@@ -67,6 +67,9 @@ class Scheduler:
             machine.pm_process = env.process(machine.PM())
             self.__machines.append(machine)
         self.__stocker = Stocker(env, self.machine_signal)
+        # 시뮬레이션 시작 시 모든 machine의 초기 idle 상태를 stocker에 알림
+        for machine in self.__machines:
+            self.machine_signal.put(machine)
         env.process(self.__chk_machine_event())
 
         self.__jobs = []
@@ -142,38 +145,12 @@ class Scheduler:
 
     def __matching_machine(self, job: Job):
         """
-        작업과 매칭되는 머신을 찾아 작업 실행 프로세스 시작
+        작업과 매칭되는 머신을 찾아 작업 실행 프로세스 시작.
+        모든 job은 항상 stocker를 경유하며, dispatch는 JOB_RULE에 의해 결정된다.
 
         Args:
             job: 매칭할 작업
         """
         if not job.prev_not_completed:
             job.start_qtime_chk()
-        target = self.__match_job_machine(job)
-        self.__env.process(target.run(job))
-        self.__env.process(job.operation_completed())
-
-    def __match_job_machine(self, job: Job):
-        """
-        setup_time + process_time이 최소인 idle machine 선택. idle machine이 없으면 stocker 반환.
-
-        Args:
-            job: 매칭할 작업
-
-        Returns:
-            Machine 또는 Stocker
-        """
-        idle_machines = [
-            x for x in self.__machines
-            if x.group == job.get_op_group()
-            and x.is_idle()
-        ]
-        if not idle_machines:
-            return self.__stocker
-        op_id = job.get_current_operation()
-        target = min(
-            idle_machines,
-            key=lambda m: m.get_setup_time(job.job_type) + m.get_process_time(op_id)
-        )
-        target.set_busy(True)
-        return target
+        self.__env.process(self.__stocker.add_job(job))

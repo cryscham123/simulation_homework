@@ -5,13 +5,31 @@ import random
 
 class Stocker():
     def __init__(self, env, signal):
+        self.__env = env
         self.__resource = simpy.FilterStore(env, capacity=float('inf'))
         self.machine_end_signal = signal
+        self.__waiting_machines = []
         env.process(self.wait_until_machine_ready())
 
-    def run(self, job:Job):
-        yield self.__resource.put(job)
+    def add_job(self, job: Job):
+        """
+        job을 stocker에 추가.
+        같은 group의 대기 중인 machine이 있으면 즉시 dispatch, 없으면 FilterStore에서 대기.
+        """
         job.prev_not_completed = True
+        matching = [m for m in self.__waiting_machines if m.group == job.get_op_group()]
+        if matching:
+            machine = min(matching, key=lambda m: int(m.id[1:]))
+            self.__waiting_machines.remove(machine)
+            self.__dispatch(job, machine)
+        else:
+            yield self.__resource.put(job)
+
+    def __dispatch(self, job: Job, machine):
+        """job을 machine으로 dispatch하고 관련 프로세스 시작"""
+        machine.set_busy(True)
+        self.__env.process(machine.run(job))
+        self.__env.process(job.operation_completed())
 
     def __select_job(self, candidates, machine, rule):
         """
@@ -43,7 +61,8 @@ class Stocker():
 
     def wait_until_machine_ready(self):
         """
-        machine이 idle 신호를 보내면 JOB_RULE에 따라 stocker에서 job 한 개를 선택해 dispatch
+        machine이 idle 신호를 보내면 JOB_RULE에 따라 stocker에서 job 한 개를 선택해 dispatch.
+        대기 중인 job이 없으면 machine을 waiting_machines에 추가.
         """
         while True:
             machine = yield self.machine_end_signal.get()
@@ -52,9 +71,9 @@ class Stocker():
                 if x.get_op_group() == machine.group
             ]
             if len(candidates) == 0:
+                self.__waiting_machines.append(machine)
                 continue
             rule = os.getenv('JOB_RULE', 'random')
             best = self.__select_job(candidates, machine, rule)
             job = yield self.__resource.get(lambda x: x is best)
-            # job에 맞는 machine이 idle이 되면 다시 dispatch
-            job.operation_end_signal.put(False)
+            self.__dispatch(job, machine)
