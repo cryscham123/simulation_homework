@@ -29,17 +29,8 @@ class DataLoader:
         data['operations'] = pd.read_csv(os.path.join(self.base_data_path, 'operations.csv'))
         data['setup_times'] = pd.read_csv(os.path.join(self.base_data_path, 'setup_times.csv'))
 
-        # Weibull 파라미터:
-        #   shape parameter: 무차원 (k) — 변환 불필요
-        #   scale parameter: 시간 단위 (λ) — 데이터가 분 단위이므로 시뮬레이션 내부 단위(분)와 일치, 변환 불필요
-        DOWN_TIME_UNIT = os.getenv('DOWN_TIME_UNIT', 'M')
-        time_constants = {
-            'M': 1,
-            'H': 60,
-            'D': 60 * 24
-        }
-        data['machine_failure']['scale parameter'] = (
-            data['machine_failure']['scale parameter'] * time_constants[DOWN_TIME_UNIT]
-        )
+        # 모든 CSV의 시간 컬럼은 분(minute) 단위로 작성되어 있으며, 시뮬레이션 내부 단위(분)와
+        # 일치하므로 입력 변환은 하지 않는다. 출력 단위 환산은 EventLogger의 TIME_UNIT이 담당한다.
+        # (Weibull: shape parameter k는 무차원, scale parameter λ는 분 단위 — 둘 다 변환 불필요)
 
         return data

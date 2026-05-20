@@ -8,7 +8,7 @@ class Stocker():
         self.__env = env
         self.__resource = simpy.FilterStore(env, capacity=float('inf'))
         self.machine_end_signal = signal
-        self.__waiting_machines = []
+        self.__waiting_machines = simpy.FilterStore(env, capacity=float('inf'))
         env.process(self.wait_until_machine_ready())
 
     def add_job(self, job: Job):
@@ -16,11 +16,13 @@ class Stocker():
         job을 stocker에 추가.
         같은 group의 대기 중인 machine이 있으면 즉시 dispatch, 없으면 FilterStore에서 대기.
         """
-        job.prev_not_completed = True
-        matching = [m for m in self.__waiting_machines if m.group == job.get_op_group()]
+        matching = [
+            m for m in self.__waiting_machines.items
+            if m.group == job.get_op_group()
+        ]
         if matching:
-            machine = min(matching, key=lambda m: int(m.id[1:]))
-            self.__waiting_machines.remove(machine)
+            best = min(matching, key=lambda m: int(m.id[1:]))
+            machine = yield self.__waiting_machines.get(lambda m: m is best)
             self.__dispatch(job, machine)
         else:
             yield self.__resource.put(job)
@@ -71,7 +73,7 @@ class Stocker():
                 if x.get_op_group() == machine.group
             ]
             if len(candidates) == 0:
-                self.__waiting_machines.append(machine)
+                yield self.__waiting_machines.put(machine)
                 continue
             rule = os.getenv('JOB_RULE', 'random')
             best = self.__select_job(candidates, machine, rule)
