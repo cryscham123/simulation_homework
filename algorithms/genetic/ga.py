@@ -49,6 +49,11 @@ class GA:
                  n_elites: int,
                  alpha: float,
                  seed: int,
+                 stagnation_patience: int = 10,
+                 mutation_boost: float = 8.0,
+                 immigrant_ratio: float = 0.2,
+                 boost_duration: int = 5,
+                 boost_cooldown: int = 10,
                  n_workers: int = 6,     ### 주의!! 각자의 컴퓨터 사양에 따라 사용하는 코어수가 달라짐 확인하고 맞춰서 값을 수정할 것
                                          ### 물리 코어 수를 확인해야함 "작업관리자-CPU" 에서 확인가능
                  verbose: bool = True,
@@ -64,6 +69,11 @@ class GA:
         self.tournament_k = tournament_k
         self.n_elites = n_elites
         self.alpha = alpha
+        self.stagnation_patience = stagnation_patience
+        self.mutation_boost = mutation_boost
+        self.immigrant_ratio = immigrant_ratio
+        self.boost_duration = boost_duration
+        self.boost_cooldown = boost_cooldown
         self.n_workers = n_workers
         self.verbose = verbose
         self.verbose_interval = verbose_interval
@@ -91,12 +101,33 @@ class GA:
             self._evaluate_batch(pool, population)
 
             history: List[Dict[str, Any]] = []
-            self._record(history, gen=0, population=population)
+            self._record(history, gen=0, population=population, boost_active=False)
             if self.verbose:
                 self._print(history[-1])
 
+            # 정체 추적 상태
+            best_so_far = history[-1]['best_fitness']
+            no_improve = 0
+            active_left = 0    # boost ON으로 남은 세대 수
+            cooldown_left = 0  # boost 강제 OFF로 남은 세대 수
+            n_immigrants = int(self.immigrant_ratio * self.pop_size)
+
             # 2. 세대 루프
             for gen in gen_iter:
+                # 2-0. boost 사이클 진입 여부 판단 (idle 상태일 때만 트리거)
+                if active_left == 0 and cooldown_left == 0 and no_improve >= self.stagnation_patience:
+                    active_left = self.boost_duration
+
+                boost_active = active_left > 0
+                if boost_active and n_immigrants > 0:
+                    # 하위 n_immigrants 명을 새 random으로 교체 (elite는 위쪽이라 영향 없음)
+                    population = sorted(population, key=self.fitness_value)
+                    for i in range(self.pop_size - n_immigrants, self.pop_size):
+                        population[i] = random_chromosome(self.encoded)
+                    self._evaluate_batch(pool, population)
+
+                mj, mm, mp = self._current_mutation_rates(boost_active)
+
                 # 2-1. Elitism: 상위 n_elites개 그대로 보존
                 elites = sorted(population, key=self.fitness_value)[:self.n_elites]
                 children: List[Chromosome] = list(elites)
@@ -106,8 +137,8 @@ class GA:
                     p1 = tournament_select(population, self.fitness_value, self.tournament_k)
                     p2 = tournament_select(population, self.fitness_value, self.tournament_k)
                     c1, c2 = crossover(p1, p2, self.crossover_rate)
-                    c1 = mutate(c1, self.encoded, self.mut_job, self.mut_machine, self.mut_pm)
-                    c2 = mutate(c2, self.encoded, self.mut_job, self.mut_machine, self.mut_pm)
+                    c1 = mutate(c1, self.encoded, mj, mm, mp)
+                    c2 = mutate(c2, self.encoded, mj, mm, mp)
                     children.append(c1)
                     if len(children) < self.pop_size:
                         children.append(c2)
@@ -118,9 +149,27 @@ class GA:
                 population = children
 
                 # 2-4. 기록 + 출력
-                self._record(history, gen=gen, population=population)
+                self._record(history, gen=gen, population=population, boost_active=boost_active)
                 if self.verbose and (gen % self.verbose_interval == 0 or gen == self.n_generations):
                     self._print(history[-1])
+
+                # 2-5. 정체 카운터 + boost 사이클 갱신
+                current_best = history[-1]['best_fitness']
+                if current_best < best_so_far:
+                    # 개선 발생 → 카운터/사이클 즉시 리셋, exploit 단계로
+                    best_so_far = current_best
+                    no_improve = 0
+                    active_left = 0
+                    cooldown_left = 0
+                else:
+                    no_improve += 1
+                    # active → 끝나면 cooldown으로 전환, cooldown → 끝나면 idle
+                    if active_left > 0:
+                        active_left -= 1
+                        if active_left == 0:
+                            cooldown_left = self.boost_cooldown
+                    elif cooldown_left > 0:
+                        cooldown_left -= 1
 
         best = min(population, key=self.fitness_value)
         return best, history
@@ -135,8 +184,17 @@ class GA:
         for c, fit in zip(to_eval, results):
             c.fitness = fit
 
+    def _current_mutation_rates(self, boost_active: bool) -> Tuple[float, float, float]:
+        """boost 모드면 mutation 3개에 배율 적용. 1.0 clamp."""
+        b = self.mutation_boost if boost_active else 1.0
+        return (
+            min(1.0, self.mut_job * b),
+            min(1.0, self.mut_machine * b),
+            min(1.0, self.mut_pm * b),
+        )
+
     def _record(self, history: List[Dict[str, Any]], gen: int,
-                population: List[Chromosome]) -> None:
+                population: List[Chromosome], boost_active: bool) -> None:
         best = min(population, key=self.fitness_value)
         avg_fitness = sum(self.fitness_value(c) for c in population) / len(population)
         history.append({
@@ -145,13 +203,16 @@ class GA:
             'best_qtime': best.fitness[1],
             'best_fitness': self.fitness_value(best),
             'avg_fitness': avg_fitness,
+            'boost_active': boost_active,
         })
 
     def _print(self, record: Dict[str, Any]) -> None:
+        boost_tag = "  [BOOST]" if record.get('boost_active') else ""
         tqdm.write(
             f"[Gen {record['gen']:3d}] "
             f"best_fitness={record['best_fitness']:.2f}  "
             f"makespan={record['best_makespan']:.2f}  "
             f"qtime={record['best_qtime']:.2f}  "
             f"avg={record['avg_fitness']:.2f}"
+            f"{boost_tag}"
         )
