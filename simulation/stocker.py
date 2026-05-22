@@ -5,8 +5,10 @@ import random
 
 class Stocker():
     def __init__(self, env, signal, op_machine=None, job_priority=None):
+        self.__env = env
         self.__resource = simpy.FilterStore(env, capacity=float('inf'))
         self.machine_end_signal = signal
+        self.__waiting_machines = simpy.FilterStore(env, capacity=float('inf'))
         self.__op_machine = op_machine
         # job_id → 순위 인덱스. 낮을수록 우선. lookup O(1).
         self.__job_priority = (
@@ -14,14 +16,27 @@ class Stocker():
         )
         env.process(self.wait_until_machine_ready())
 
+    def __is_match(self, job: Job, machine):
+        """GA 모드: op_id가 배정된 정확한 머신만. 룰 모드: 같은 op_group."""
+        if self.__op_machine is not None:
+            return self.__op_machine[job.get_current_operation()] == machine.id
+        return machine.group == job.get_op_group()
+
+    def __pick_job(self, candidates, machine):
+        """GA 모드: priority 인덱스 최소. 룰 모드: JOB_RULE env."""
+        if self.__job_priority is not None:
+            return min(candidates, key=lambda j: self.__job_priority[j.id])
+        rule = os.getenv('JOB_RULE', 'random')
+        return self.__select_job(candidates, machine, rule)
+
     def add_job(self, job: Job):
         """
         job을 stocker에 추가.
-        같은 group의 대기 중인 machine이 있으면 즉시 dispatch, 없으면 FilterStore에서 대기.
+        매칭되는 대기 중인 machine이 있으면 즉시 dispatch, 없으면 FilterStore에서 대기.
         """
         matching = [
             m for m in self.__waiting_machines.items
-            if m.group == job.get_op_group()
+            if self.__is_match(job, m)
         ]
         if matching:
             best = min(matching, key=lambda m: int(m.id[1:]))
@@ -71,26 +86,13 @@ class Stocker():
         """
         while True:
             machine = yield self.machine_end_signal.get()
-            if self.__op_machine is not None:
-                # GA 모드: GA가 이 머신에 배정한 job들만 후보
-                candidates = [
-                    x for x in self.__resource.items
-                    if self.__op_machine[x.get_current_operation()] == machine.id
-                ]
-            else:
-                # 룰 기반: 같은 group이면 후보
-                candidates = [
-                    x for x in self.__resource.items
-                    if x.get_op_group() == machine.group
-                ]
+            candidates = [
+                x for x in self.__resource.items
+                if self.__is_match(x, machine)
+            ]
             if len(candidates) == 0:
                 yield self.__waiting_machines.put(machine)
                 continue
-            if self.__job_priority is not None:
-                # GA 모드: 우선순위 인덱스가 낮은 job 선택
-                best = min(candidates, key=lambda j: self.__job_priority[j.id])
-            else:
-                rule = os.getenv('JOB_RULE', 'random')
-                best = self.__select_job(candidates, machine, rule)
+            best = self.__pick_job(candidates, machine)
             job = yield self.__resource.get(lambda x: x is best)
             self.__dispatch(job, machine)
