@@ -9,6 +9,7 @@ from .stocker import Stocker
 class Scheduler:
     """시뮬레이션 환경의 스케줄러 클래스"""
 
+
     def __init__(self,
                  env: simpy.Environment,
                  data: Dict[str, pd.DataFrame],
@@ -16,7 +17,11 @@ class Scheduler:
                  pm_hazard_threshold: float,
                  job_priority: Optional[List[str]] = None,
                  op_machine: Optional[Dict[str, str]] = None,
-                 pm_thresholds: Optional[Dict[str, float]] = None):
+                 pm_thresholds: Optional[Dict[str, float]] = None,
+                 pm_rule: str = "THRESHOLD",
+                 pm_interval_dict: Dict[str, float] = None
+                 ):
+
         """
         Scheduler 초기화
 
@@ -33,6 +38,8 @@ class Scheduler:
         self.__op_machine = op_machine
         self.__WIP = 0
         self.__machines = []
+        self.pm_rule = pm_rule.upper()
+        self.pm_interval_dict = pm_interval_dict or {}
         self.machine_signal = simpy.Store(env, capacity=float('inf'))
         self.machine_events = simpy.Store(env, capacity=float('inf'))
 
@@ -61,17 +68,23 @@ class Scheduler:
             machine_threshold = (
                 pm_thresholds[machine_id] if pm_thresholds is not None else pm_hazard_threshold
             )
+            pm_interval = None
+
+            if self.pm_rule == "MTTF":
+                pm_interval = self.pm_interval_dict.get(machine_id)
             machine = Machine(
                 env=env,
                 id=machine_id,
                 group=machine_group,
-                failure_info=failure_info,
+                failure_info=failsure_info,
                 setup_time_info=setup_time_info,
                 process_time_info=process_time_info,
                 pm_hazard_threshold=machine_threshold,
                 event_logger=event_logger,
                 event_queue=self.machine_events,
                 machine_signal=self.machine_signal,
+                pm_rule=self.pm_rule,
+                pm_interval=pm_interval,
             )
             machine.down_process = env.process(machine.down())
             machine.pm_process = env.process(machine.PM())
