@@ -26,9 +26,6 @@ COMPOSITE dispatching rule의 priority score 계산 모듈 (Index Policy).
     c_transition은 '다음 transition의 위험도'를 부정 부호로 넣어
     위험한 transition으로 들어가는 job이 작은 값 → 우선이 되게 한다.
 
-  주의: 메커니즘 2(WIP Cap)는 데이터 구조상 G3/G4 op의 다음 공정이
-  100% G1이어서 'candidate 중 일부만 후순위화'가 불가능하므로 제외했다.
-
 파라미터는 환경변수로 노출되어 SAA 튜닝에서 sweep 가능하다.
 """
 import os
