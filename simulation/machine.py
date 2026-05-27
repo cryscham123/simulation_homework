@@ -252,7 +252,7 @@ class Machine:
                 self.cur_state = Machine.State.WORKING
                 job.set_state(Job.State.WORKING)
                 self.__event_idx = self.__event_logger.log_event_start(self.__id, 
-                                                                       f'working-{job.job_type}', 
+                                                                       f'working-{job.id}', 
                                                                        'machine', op_id,
                                                                        f'job: {job.id}\noperation: {op_id}')
                 yield self.__env.timeout(self.get_process_time(op_id))

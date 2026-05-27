@@ -9,3 +9,4 @@
 *_files
 *.html
 !final_report.qmd
+*.quarto_ipynb*
