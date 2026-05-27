@@ -4,27 +4,19 @@ COMPOSITE dispatching rule의 priority score 계산 모듈 (Index Policy).
 수리적 근거:
   Index Policy(복합 priority score)를 선형결합으로 정의한다.
 
-  π(j) = α·norm(α_term(j))
+  π(j) = α·norm(PT(j))
        + β·norm(slack_qtime(j))
        + γ·norm(c_transition(j))
        + δ·norm(setup(j))
 
-  - α_term은 환경변수 COMPOSITE_ALPHA_TERM으로 선택한다:
-      * 'WAIT_TIME' (기본): WAITING 상태 누적 대기 시간(분). 클수록 우선
-        (FIFO 일관성)이 되도록 음수로 반환한다 → norm 후 가장 오래 기다린
-        job이 가장 작은 값 → 우선. 같은 op_group candidate라도 stocker
-        도착 시점이 달라 자연스럽게 variance가 생긴다.
-      * 'CRITICAL_RATIO': remain_qtime / next_PT. 작을수록 위험 → 우선.
-        slack을 next PT로 정규화한 형태. qtime=inf는 None → 모집단 제외.
-    α 자리에 어떤 정보 항이 들어갈지를 단계별 가설 검증으로 갈아끼우기
-    위한 hook이다(grid 차원·환경변수 이름은 유지 → 노트북 호환).
-
   - 각 항은 candidate 집합 내 min-max 정규화 → 가중치 α,β,γ,δ는
     스케일 보정이 아니라 순수 '중요도'만 담당한다.
-  - π는 'min 선택 = 낮을수록 우선'. setup은 작을수록 우선(SPT 일관성),
-    slack은 작을수록 위험하므로 그대로 작은 값 → 우선,
-    c_transition은 '다음 transition의 위험도'를 부정 부호로 넣어
-    위험한 transition으로 들어가는 job이 작은 값 → 우선이 되게 한다.
+  - π는 'min 선택 = 낮을수록 우선'.
+      * PT(α): 짧을수록 우선 (SPT 일관성) — 그대로 작은 값 → 우선
+      * slack(β): 작을수록 위험 → 그대로 작은 값 → 우선
+      * c_transition(γ): '다음 transition의 위험도'를 부정 부호로 넣어
+        위험한 transition으로 들어가는 job이 작은 값 → 우선
+      * setup(δ): 짧을수록 우선 (SPT 일관성)
 
 파라미터는 환경변수로 노출되어 SAA 튜닝에서 sweep 가능하다.
 """
@@ -35,13 +27,13 @@ EPS = 1e-9
 # remain_qtime을 유한 범위로 묶기 위한 클리핑 상한.
 SLACK_CLIP = 1e7
 
-# transition 위험 가중치 테이블. saa_evaluator가 baseline 측정 후 주입한다.
+# transition 위험 가중치 테이블. saa_evaluator가 데이터 기반으로 산출 후 주입한다.
 # key: 'prevGroup->curGroup', value: [0,1] 위험도. 비어 있으면 c_transition=0.
 _TRANSITION_RISK = {}
 
 
 def set_transition_risk_table(table):
-    """saa_evaluator에서 측정한 transition 위험 테이블을 모듈에 주입한다."""
+    """saa_evaluator에서 산출한 transition 위험 테이블을 모듈에 주입한다."""
     global _TRANSITION_RISK
     _TRANSITION_RISK = dict(table) if table else {}
 
@@ -102,6 +94,16 @@ def _min_max_norm_skip_none(values):
     return out
 
 
+def _process_time(job, machine):
+    """
+    α 항: 현재 candidate operation의 PT. 짧을수록 우선 (SPT 일관성).
+
+    부호: π는 'min 선택 = 우선'이므로 짧은 PT 그대로 작은 값 → 우선.
+    PT는 항상 유한값이므로 None 처리 불필요.
+    """
+    return float(machine.get_process_time(job.get_current_operation()))
+
+
 def _slack_raw(job):
     """
     slack_qtime 그 자체(= remain_qtime). 작을수록 위험.
@@ -117,46 +119,6 @@ def _slack_raw(job):
     if remain == float('inf'):
         return None
     return max(min(remain, SLACK_CLIP), -SLACK_CLIP)
-
-
-def _critical_ratio(job, machine):
-    """
-    Critical Ratio (A-3): remain_qtime / next_process_time. 작을수록 우선.
-
-    근거: slack(remain_qtime)은 시간의 절대 여유만 보지만, CR은 그 여유를
-    '다음 작업이 얼마나 시간을 잡아먹는지'로 정규화한다. 같은 잔여 qtime이라도
-    next PT가 긴 job이 더 위험(시간이 빠듯).
-
-    부호: π는 'min 선택 = 우선'. 작은 CR(시간 압박↑) 그대로 작은 값 → 우선.
-
-    qtime이 inf(=qtime 없는 op, 위반 불가)이면 None을 반환해 정규화 모집단에서
-    제외하고 norm=1.0(최후순위) 부여(slack과 동일 처리).
-
-    next_process_time은 현재 머신 기준 PT. PT가 0에 가까우면 division 보호.
-    """
-    remain = job.get_remain_qtime()
-    if remain == float('inf'):
-        return None
-    pt = machine.get_process_time(job.get_current_operation())
-    return float(remain) / max(float(pt), EPS)
-
-
-def _waiting_time_neg(job):
-    """
-    WAITING 상태 누적 대기 시간(분)을 음수로 반환 (FIFO 일관성, A-2).
-
-    근거: result_compare에서 FIFO가 makespan 최저(213.5h)이고 QV도 낮음.
-    "오래 기다린 job을 먼저 dispatch" 신호가 큐 평탄화 → G1 throughput 안정화
-    → G1→G4 위반(현재 미해결 표적) 감소에 기여한다는 가설.
-
-    부호: π는 'min 선택 = 우선'이므로, 가장 오래 기다린 job이 가장 작은 값을
-    받아야 우선이 된다 → -waiting_time. min-max norm 후에도 부호가 유지되어
-    오래 기다린 candidate가 norm≈0 → score 낮음 → 우선.
-
-    candidate 변별력: 같은 op_group candidate라도 stocker 도착 시점이 다르면
-    waiting_time이 다르므로 norm 후 0~1로 자연스럽게 펼쳐진다.
-    """
-    return -float(job.get_waiting_time())
 
 
 def _transition_risk(job):
@@ -176,26 +138,6 @@ def _transition_risk(job):
     return -float(_TRANSITION_RISK.get(trans, 0.0))
 
 
-def _alpha_term_values(candidates, machine):
-    """
-    α 항의 raw 값 리스트. COMPOSITE_ALPHA_TERM 환경변수로 정의를 전환한다.
-
-      'WAIT_TIME'(기본): -job.get_waiting_time() — FIFO 일관성
-      'CRITICAL_RATIO' : remain_qtime / next_PT — CR.
-                         qtime=inf인 job은 None → 정규화 모집단 제외, norm=1.0
-    """
-    term = os.getenv('COMPOSITE_ALPHA_TERM', 'WAIT_TIME').upper()
-    if term == 'CRITICAL_RATIO':
-        return [_critical_ratio(j, machine) for j in candidates]
-    # default: WAIT_TIME
-    return [_waiting_time_neg(j) for j in candidates]
-
-
-def _alpha_term_uses_skip_none():
-    """현재 α-term이 None을 모집단에서 제외해야 하는지 (slack과 동일 처리)."""
-    return os.getenv('COMPOSITE_ALPHA_TERM', 'WAIT_TIME').upper() == 'CRITICAL_RATIO'
-
-
 def composite_select(candidates, machine):
     """
     COMPOSITE rule: candidate 중 priority score π가 최소인 job을 선택.
@@ -209,15 +151,12 @@ def composite_select(candidates, machine):
     """
     p = _get_params()
 
-    a_raw = _alpha_term_values(candidates, machine)
-    slack = [_slack_raw(j) for j in candidates]
-    trans = [_transition_risk(j) for j in candidates]
+    pt    = [_process_time(j, machine) for j in candidates]
+    slack = [_slack_raw(j)             for j in candidates]
+    trans = [_transition_risk(j)       for j in candidates]
     setup = [machine.get_setup_time(j.job_type) for j in candidates]
 
-    # α-term이 CRITICAL_RATIO이면 None(qtime=inf)이 섞이므로 skip_none 정규화 사용
-    n_a = (_min_max_norm_skip_none(a_raw)
-           if _alpha_term_uses_skip_none()
-           else _min_max_norm(a_raw))
+    n_pt    = _min_max_norm(pt)
     n_slack = _min_max_norm_skip_none(slack)  # inf(위반 불가) op은 모집단 제외
     n_trans = _min_max_norm(trans)
     n_setup = _min_max_norm(setup)
@@ -225,8 +164,8 @@ def composite_select(candidates, machine):
     best_idx, best_score = 0, float('inf')
     for i in range(len(candidates)):
         score = (
-            p['alpha'] * n_a[i]
-            + p['beta'] * n_slack[i]
+            p['alpha'] * n_pt[i]
+            + p['beta']  * n_slack[i]
             + p['gamma'] * n_trans[i]
             + p['delta'] * n_setup[i]
         )

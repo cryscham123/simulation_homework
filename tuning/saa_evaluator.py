@@ -54,25 +54,12 @@ def _makespan(log_df):
     return float(jl.groupby('id')['finish'].max().max())
 
 
-def _build_op_transition_map(data):
-    """op_id -> 'prev_group->op_group' 매핑. 첫 op은 prev가 없어 제외된다."""
-    ops = data['operations'].sort_values(['job_id', 'op_seq']).copy()
-    ops['prev_group'] = ops.groupby('job_id')['op_group'].shift(1)
-    ops = ops.dropna(subset=['prev_group'])
-    ops['transition'] = ops['prev_group'] + '->' + ops['op_group']
-    return ops.set_index('op_id')['transition'].to_dict()
-
-
 class SAAEvaluator:
     """COMPOSITE rule 파라미터에 대한 SAA 평가기."""
 
     PARAM_NAMES = ('alpha', 'beta', 'gamma', 'delta')
 
-    # transition 위험 테이블 산출에 쓰는 기존 rule 집합.
-    RISK_PROBE_RULES = ('FIFO', 'SPT', 'LPT', 'MIN_QTIME', 'SPTSSU')
-
     def __init__(self, data,
-                 reference_w=(1.0, 1.0, 1.0, 1.0),
                  n_ref=20,
                  obj_weights=(1.0, 1.0),
                  pm_hazard_threshold=0.1,
@@ -82,8 +69,6 @@ class SAAEvaluator:
         """
         Args:
             data: DataLoader.load_all_data() 결과
-            reference_w: 정규화 기준이 되는 COMPOSITE 파라미터.
-                         기본 (1,1,1,1) = COMPOSITE의 중립 출발점.
             n_ref: mk_ref, qv_ref 산출용 replication 수
             obj_weights: (w1, w2) — Makespan 항과 QV 항의 명시적 가중치.
                          기본 (1.0, 1.0) = 사용자가 의도한 1:1.
@@ -94,9 +79,7 @@ class SAAEvaluator:
         self.pm_hazard_threshold = pm_hazard_threshold
         self.base_seed = base_seed
         self.w1, self.w2 = obj_weights
-        self.reference_w = tuple(reference_w)
         self.n_ref = n_ref
-        self._op2trans = _build_op_transition_map(data)
 
         # DOWN/PM 활성 여부는 호출자가 결정한다(기본은 비활성으로 결정론 시나리오).
         # DOWN_ACTIVE=True면 Machine.down 프로세스가 활성화되어 같은 w에서도 seed별로
@@ -149,41 +132,61 @@ class SAAEvaluator:
     # ---- transition 위험 가중치 테이블 ----
     def _compute_transition_risk(self):
         """
-        RISK_PROBE_RULES를 각각 1회 실행해 transition별 qtime violation 시간을
-        합산하고, 최댓값으로 나눠 [0,1] 위험 가중치 테이블을 만든다.
+        데이터 기반 결정론적 transition 위험도.
 
-        위반이 한 건도 없으면 빈 테이블을 반환한다(c_transition 항이 무영향).
+          risk_raw[A->B] = (1 / qtime_limit[A->B]) × frequency[A->B]
+            - 1/qtime_limit: 제약이 짧을수록 위험
+            - frequency      : job mix 안에서 A->B가 자주 일어날수록 위험
+
+        최댓값으로 정규화해 [0,1] 위험 가중치 테이블을 만든다. policy 독립적이고
+        stochastic noise도 없어 reproducible하다. breakdown 같은 불확실성 효과는
+        runtime의 slack(β)/CR(α) 항이 잡으므로 c_transition은 선험적 위험만 담는다.
+
+        qtime_limit이 inf 또는 0 이하인 transition은 '제약 없음'으로 보고 테이블에서
+        제외 (c_transition=0). qtime_limit은 transition별 평균을 대표값으로 사용한다.
         """
-        agg = {}
-        for rule in self.RISK_PROBE_RULES:
-            log_df = self._run_once(rule, self.base_seed)
-            qv = log_df[log_df['event'] == 'qtime_over'].copy()
-            if len(qv) == 0:
-                continue
-            qv['dur'] = qv['finish'] - qv['start']
-            qv['transition'] = qv['op_id'].map(self._op2trans)
-            for trans, dur in qv.groupby('transition')['dur'].sum().items():
-                agg[trans] = agg.get(trans, 0.0) + float(dur)
-        if not agg:
+        ops = self.data['operations'].sort_values(['job_id', 'op_seq']).copy()
+        ops['prev_group'] = ops.groupby('job_id')['op_group'].shift(1)
+        ops = ops.dropna(subset=['prev_group'])
+        ops['transition'] = ops['prev_group'] + '->' + ops['op_group']
+
+        qt = ops['qtime'].astype(float).copy()
+        qt[qt <= 0] = float('inf')
+        ops['qtime_eff'] = qt
+
+        total = len(ops)
+        if total == 0:
             return {}
-        peak = max(agg.values())
+
+        raw = {}
+        for trans, grp in ops.groupby('transition'):
+            qt_mean = float(grp['qtime_eff'].mean())
+            if not np.isfinite(qt_mean) or qt_mean <= 0:
+                continue
+            freq = len(grp) / total
+            raw[trans] = (1.0 / qt_mean) * freq
+
+        if not raw:
+            return {}
+        peak = max(raw.values())
         if peak <= 0:
             return {}
-        return {t: v / peak for t, v in agg.items()}
+        return {t: v / peak for t, v in raw.items()}
 
     # ---- 목적함수 정규화 기준 ----
     def _compute_reference(self):
         """
-        reference_w로 COMPOSITE를 n_ref회 실행해 mk_ref, qv_ref(평균)를 구한다.
-        qv_ref가 0이면(위반 전무) 1.0으로 대체해 0 나눗셈을 막는다.
+        utopia-point 정규화: 각 metric별로 가장 유리한 단일 rule의 평균을 기준값으로 삼는다.
+          mk_ref = mean(makespan of SPTSSU runs)   # Makespan에 가장 유리한 rule
+          qv_ref = mean(QV       of MIN_QTIME runs) # QV에 가장 유리한 rule
+
+        의미: J=1.0이면 COMPOSITE가 두 metric 모두에서 단일 rule best와 동등.
+              J<1.0이면 COMPOSITE가 두 축의 utopia point보다 우월 (= trade-off에서 유의미한 개선).
+        qv_ref=0이면(위반 전무) 1.0으로 대체해 0 나눗셈을 막는다.
         """
-        self._apply_params(self.reference_w)
         seeds = self._seed_list(self.n_ref)
-        mks, qvs = [], []
-        for s in seeds:
-            log_df = self._run_once('COMPOSITE', s)
-            mks.append(_makespan(log_df))
-            qvs.append(_qtime_violation(log_df))
+        mks = [_makespan(self._run_once('SPTSSU', s)) for s in seeds]
+        qvs = [_qtime_violation(self._run_once('MIN_QTIME', s)) for s in seeds]
         mk_ref = float(np.mean(mks))
         qv_ref = float(np.mean(qvs))
         if qv_ref <= 0:
@@ -262,7 +265,6 @@ class SAAEvaluator:
     def summary(self):
         """초기화 결과(정규화 기준, transition 위험 테이블) 요약 dict."""
         return {
-            'reference_w': self.reference_w,
             'mk_ref': self.mk_ref,
             'qv_ref': self.qv_ref,
             'obj_weights': (self.w1, self.w2),
