@@ -65,7 +65,9 @@ class SAAEvaluator:
                  pm_hazard_threshold=0.1,
                  base_seed=0,
                  down_active=False,
-                 pm_active=False):
+                 pm_active=False,
+                 mk_ref=None,
+                 qv_ref=None):
         """
         Args:
             data: DataLoader.load_all_data() 결과
@@ -74,6 +76,10 @@ class SAAEvaluator:
                          기본 (1.0, 1.0) = 사용자가 의도한 1:1.
             pm_hazard_threshold: Scheduler에 넘길 PM 임계값 (PM 비활성 시 무영향)
             base_seed: seed_list 생성 기준값. seed_list[i] = base_seed + i
+            mk_ref, qv_ref: 외부에서 산출한 정규화 기준값. 둘 다 주면
+                내부 _compute_reference()를 건너뛴다.
+                result_compare.ipynb가 6개 baseline rule × 30 run의 산술평균으로
+                산출해 data/normalization_ref.json에 저장한 값을 그대로 받기 위함.
         """
         self.data = data
         self.pm_hazard_threshold = pm_hazard_threshold
@@ -105,8 +111,16 @@ class SAAEvaluator:
             pass
 
         # 2) 목적함수 정규화 기준(mk_ref, qv_ref) 산출
-        #    reference_w로 COMPOSITE를 돌리므로 위 테이블이 먼저 주입돼 있어야 한다.
-        self.mk_ref, self.qv_ref = self._compute_reference()
+        #    외부에서 mk_ref, qv_ref를 모두 주입하면 내부 산출을 건너뛴다.
+        #    (result_compare.ipynb가 6개 rule × 30 run 산술평균으로 산출한 값을
+        #     data/normalization_ref.json에서 로드해 넘기는 경로 지원)
+        if mk_ref is not None and qv_ref is not None:
+            self.mk_ref = float(mk_ref)
+            self.qv_ref = float(qv_ref) if qv_ref > 0 else 1.0
+            self._ref_source = 'external'
+        else:
+            self.mk_ref, self.qv_ref = self._compute_reference()
+            self._ref_source = 'internal'
 
     # ---- 내부: 단일 시뮬레이션 ----
     def _run_once(self, job_rule, seed):
