@@ -1,25 +1,3 @@
-"""
-COMPOSITE dispatching rule의 priority score 계산 모듈 (Index Policy).
-
-수리적 근거:
-  Index Policy(복합 priority score)를 선형결합으로 정의한다.
-
-  π(j) = α·norm(PT(j))
-       + β·norm(slack_qtime(j))
-       + γ·norm(c_transition(j))
-       + δ·norm(setup(j))
-
-  - 각 항은 candidate 집합 내 min-max 정규화 → 가중치 α,β,γ,δ는
-    스케일 보정이 아니라 순수 '중요도'만 담당한다.
-  - π는 'min 선택 = 낮을수록 우선'.
-      * PT(α): 짧을수록 우선 (SPT 일관성) — 그대로 작은 값 → 우선
-      * slack(β): 작을수록 위험 → 그대로 작은 값 → 우선
-      * c_transition(γ): '다음 transition의 위험도'를 부정 부호로 넣어
-        위험한 transition으로 들어가는 job이 작은 값 → 우선
-      * setup(δ): 짧을수록 우선 (SPT 일관성)
-
-파라미터는 환경변수로 노출되어 SAA 튜닝에서 sweep 가능하다.
-"""
 import os
 
 EPS = 1e-9
@@ -28,8 +6,11 @@ EPS = 1e-9
 SLACK_CLIP = 1e7
 
 # transition 위험 가중치 테이블. saa_evaluator가 데이터 기반으로 산출 후 주입한다.
-# key: 'prevGroup->curGroup', value: [0,1] 위험도. 비어 있으면 c_transition=0.
 _TRANSITION_RISK = {}
+
+# normalizer 종류 식별자
+NORM_MINMAX = 'minmax'
+NORM_MINMAX_SKIP_NONE = 'minmax_skip_none'
 
 
 def set_transition_risk_table(table):
@@ -43,16 +24,32 @@ def get_transition_risk_table():
     return dict(_TRANSITION_RISK)
 
 
-def _get_params():
-    """환경변수에서 COMPOSITE rule 파라미터를 읽는다."""
-    return {
-        'alpha': float(os.getenv('COMPOSITE_ALPHA', '1.0')),
-        'beta': float(os.getenv('COMPOSITE_BETA', '1.0')),
-        'gamma': float(os.getenv('COMPOSITE_GAMMA', '1.0')),
-        'delta': float(os.getenv('COMPOSITE_DELTA', '1.0')),
-    }
+# ---- weight / slot 환경변수 ----
+SLOT_NAMES = ('alpha', 'beta', 'gamma', 'delta')
+
+# 슬롯별 기본 항 (env var 미설정 시 기존 동작과 동일)
+_DEFAULT_SLOT_TERMS = {
+    'alpha': 'PT',
+    'beta':  'SLACK',
+    'gamma': 'C_TRANSITION',
+    'delta': 'SETUP',
+}
 
 
+def _get_weights():
+    """환경변수에서 슬롯별 가중치를 읽는다."""
+    return {s: float(os.getenv(f'COMPOSITE_{s.upper()}', '1.0'))
+            for s in SLOT_NAMES}
+
+
+def _get_slot_terms():
+    """환경변수에서 슬롯 → 항 이름 매핑을 읽는다."""
+    return {s: os.getenv(f'COMPOSITE_{s.upper()}_TERM',
+                          _DEFAULT_SLOT_TERMS[s]).upper()
+            for s in SLOT_NAMES}
+
+
+# ---- normalizer ----
 def _min_max_norm(values):
     """
     candidate 집합 내 min-max 정규화 → [0, 1].
@@ -72,11 +69,9 @@ def _min_max_norm_skip_none(values):
     slack 항에서 qtime 없는 op(remain_qtime=inf)을 정규화 모집단에 넣으면,
     span이 거대해져 유한 위험값들이 전부 0 근처로 뭉개진다(위험 변별 소실).
     → None은 모집단에서 제외하고 min-max를 잡은 뒤 norm=1.0(가장 안전)을
-    부여한다. slack 항은 'min 선택 = 낮을수록 우선'이므로 norm=1.0이면
-    후순위가 된다. 이로써 '위험한 job들끼리의 상대 위험도'가 정규화 후에도
-    보존되고, 위반 불가 op은 위험 job보다 항상 뒤로 밀린다.
+    부여한다. 'min 선택 = 낮을수록 우선'이므로 norm=1.0이면 후순위가 된다.
 
-    단, 유한 위험 job이 하나도 없으면(모두 inf) 이 항은 무의미하므로 0 처리.
+    단, 유한 위험 job이 하나도 없으면(모두 None) 이 항은 무의미하므로 0 처리.
     """
     finite = [v for v in values if v is not None]
     if not finite:
@@ -94,81 +89,142 @@ def _min_max_norm_skip_none(values):
     return out
 
 
-def _process_time(job, machine):
+_NORMALIZERS = {
+    NORM_MINMAX: _min_max_norm,
+    NORM_MINMAX_SKIP_NONE: _min_max_norm_skip_none,
+}
+
+
+# ---- 항(term) 정의 ----
+# 모든 raw_fn은 (candidates, machine) -> List[float | None]
+# 부호 규약: "작은 값일수록 우선" (min 선택과 일치) 이 되도록 raw에서 부호를 맞춘다.
+#
+# 새 항 추가는 함수 정의 후 TERM_REGISTRY에 한 줄 등록만 하면 끝.
+
+def _term_pt(candidates, machine):
+    """PT: 현재 candidate op의 process time. 짧을수록 우선."""
+    return [float(machine.get_process_time(j.get_current_operation()))
+            for j in candidates]
+
+
+def _term_slack(candidates, machine):
     """
-    α 항: 현재 candidate operation의 PT. 짧을수록 우선 (SPT 일관성).
-
-    부호: π는 'min 선택 = 우선'이므로 짧은 PT 그대로 작은 값 → 우선.
-    PT는 항상 유한값이므로 None 처리 불필요.
+    SLACK: remain_qtime. 작을수록(여유 없을수록) 우선.
+    remain_qtime이 inf(qtime 없음 → 위반 불가)인 candidate는 None으로
+    반환 → 정규화 모집단에서 제외하고 가장 후순위.
     """
-    return float(machine.get_process_time(job.get_current_operation()))
+    out = []
+    for j in candidates:
+        r = j.get_remain_qtime()
+        if r == float('inf'):
+            out.append(None)
+        else:
+            out.append(max(min(r, SLACK_CLIP), -SLACK_CLIP))
+    return out
 
 
-def _slack_raw(job):
+def _term_setup(candidates, machine):
+    """SETUP: machine 기준 setup time. 짧을수록 우선."""
+    return [float(machine.get_setup_time(j.job_type)) for j in candidates]
+
+
+def _term_c_transition(candidates, machine):
     """
-    slack_qtime 그 자체(= remain_qtime). 작을수록 위험.
-
-    π는 'min 선택 = 낮을수록 우선'이므로, 위험한 job(작은 slack)이 작은
-    항 값을 받아야 우선순위가 올라간다. 따라서 +slack을 그대로 쓴다
-    (정규화 후 위험 job → norm≈0 → score 낮음 → 우선).
-
-    remain_qtime이 inf(qtime 없는 op → 위반 불가)이면 None을 반환해
-    정규화 모집단에서 제외하고, 가장 안전하도록 norm=1.0을 부여한다.
+    C_TRANSITION: 다음 transition의 사전 위험도(데이터 기반 [0,1]).
+    위험할수록 우선이 되도록 부호를 반전해 음수로 반환한다.
+    다음 op 없거나 테이블 미등록 transition은 0.
     """
-    remain = job.get_remain_qtime()
-    if remain == float('inf'):
-        return None
-    return max(min(remain, SLACK_CLIP), -SLACK_CLIP)
+    out = []
+    for j in candidates:
+        trans = j.get_next_transition()
+        if trans is None:
+            out.append(0.0)
+        else:
+            out.append(-float(_TRANSITION_RISK.get(trans, 0.0)))
+    return out
 
 
-def _transition_risk(job):
+def _term_completion_fast(candidates, machine):
     """
-    job이 '현재 op를 끝낸 뒤 들어갈 다음 transition'의 위험도.
-
-    부호 규약: π는 'min 선택 = 우선'이므로, 위험한 transition으로 들어가는
-    job이 작은 항 값을 받아야 우선이 된다 → 위험도를 음수로 반환해
-    위험할수록 score를 끌어내린다(정규화 전).
-
-    다음 op이 없으면(현재 op이 마지막) 위험 없음 → 0.0.
-    테이블에 없는 transition도 0.0.
+    COMPLETION_FAST: 진행이 많이 된 job을 우선 (빠른 job 우선 투입).
+    completion_ratio = cur_seq / total_ops. 높을수록 우선이 되도록 부호 반전.
     """
-    trans = job.get_next_transition()
-    if trans is None:
-        return 0.0
-    return -float(_TRANSITION_RISK.get(trans, 0.0))
+    out = []
+    for j in candidates:
+        total = j.total_ops
+        if total <= 0:
+            out.append(0.0)
+        else:
+            out.append(-(j.cur_seq / total))
+    return out
+
+
+def _term_completion_slow(candidates, machine):
+    """
+    COMPLETION_SLOW: 진행이 느린 job을 우선 (덜 끝난 job 보호).
+    completion_ratio = cur_seq / total_ops. 낮을수록 우선 → 그대로.
+    """
+    out = []
+    for j in candidates:
+        total = j.total_ops
+        if total <= 0:
+            out.append(0.0)
+        else:
+            out.append(j.cur_seq / total)
+    return out
+
+
+def _term_waiting(candidates, machine):
+    """
+    WAITING: 현재 WAITING 상태에서의 누적 대기 시간. 오래 기다린 job 우선.
+    "오래 기다린 = 우선"이 되도록 음수로 반환.
+    """
+    return [-float(j.get_waiting_time()) for j in candidates]
+
+
+# (raw_fn, normalizer) 쌍 등록.
+# 새 후보 항 추가는 여기에 한 줄 추가하면 끝.
+TERM_REGISTRY = {
+    'PT':              (_term_pt,              NORM_MINMAX),
+    'SLACK':           (_term_slack,           NORM_MINMAX_SKIP_NONE),
+    'SETUP':           (_term_setup,           NORM_MINMAX),
+    'C_TRANSITION':    (_term_c_transition,    NORM_MINMAX),
+    'COMPLETION_FAST': (_term_completion_fast, NORM_MINMAX),
+    'COMPLETION_SLOW': (_term_completion_slow, NORM_MINMAX),
+    'WAITING':         (_term_waiting,         NORM_MINMAX),
+}
+
+
+def available_terms():
+    """등록된 항 이름 리스트."""
+    return list(TERM_REGISTRY.keys())
 
 
 def composite_select(candidates, machine):
     """
     COMPOSITE rule: candidate 중 priority score π가 최소인 job을 선택.
 
-    Args:
-        candidates: dispatch 후보 job 리스트 (모두 machine.group과 동일 op group)
-        machine: dispatch 대상 machine
-
-    Returns:
-        선택된 Job
+    슬롯(α/β/γ/δ)별로 어떤 항을 끼울지는 환경변수
+      COMPOSITE_<SLOT>_TERM (값: TERM_REGISTRY key)
+    로 결정한다. 미설정이면 _DEFAULT_SLOT_TERMS에 따른다.
     """
-    p = _get_params()
+    weights = _get_weights()
+    slots = _get_slot_terms()
 
-    pt    = [_process_time(j, machine) for j in candidates]
-    slack = [_slack_raw(j)             for j in candidates]
-    trans = [_transition_risk(j)       for j in candidates]
-    setup = [machine.get_setup_time(j.job_type) for j in candidates]
-
-    n_pt    = _min_max_norm(pt)
-    n_slack = _min_max_norm_skip_none(slack)  # inf(위반 불가) op은 모집단 제외
-    n_trans = _min_max_norm(trans)
-    n_setup = _min_max_norm(setup)
+    norm_by_slot = {}
+    for slot, term_name in slots.items():
+        if term_name not in TERM_REGISTRY:
+            raise KeyError(
+                f"COMPOSITE_{slot.upper()}_TERM='{term_name}' 은 등록된 항이 아니다. "
+                f"사용 가능: {available_terms()}"
+            )
+        raw_fn, norm_kind = TERM_REGISTRY[term_name]
+        raw = raw_fn(candidates, machine)
+        norm_by_slot[slot] = _NORMALIZERS[norm_kind](raw)
 
     best_idx, best_score = 0, float('inf')
     for i in range(len(candidates)):
-        score = (
-            p['alpha'] * n_pt[i]
-            + p['beta']  * n_slack[i]
-            + p['gamma'] * n_trans[i]
-            + p['delta'] * n_setup[i]
-        )
+        score = sum(weights[s] * norm_by_slot[s][i] for s in SLOT_NAMES)
         if score < best_score:
             best_idx, best_score = i, score
 

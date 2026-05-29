@@ -76,6 +76,11 @@ class Job:
         return self.__cur_seq
 
     @property
+    def total_ops(self):
+        """이 job의 총 operation 수. priority.COMPLETION_* 항이 사용."""
+        return len(self.__op_seq)
+
+    @property
     def priority(self):
         return self.__priority
 

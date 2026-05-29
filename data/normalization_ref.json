@@ -1,0 +1,44 @@
+{
+  "mk_ref": 12701.391538129681,
+  "qv_ref": 7337.847861398688,
+  "mk_ref_rule": "MIN_QTIME",
+  "qv_ref_rule": "MIN_QTIME",
+  "unit": "M",
+  "source_time_unit": "H",
+  "method": "utopia_point",
+  "n_runs": 30,
+  "rules": [
+    "random",
+    "FIFO",
+    "SPT",
+    "LPT",
+    "MIN_QTIME",
+    "SPTSSU"
+  ],
+  "per_rule_mean": {
+    "FIFO": {
+      "makespan": 12985.446,
+      "qtime_violations": 43340.983
+    },
+    "LPT": {
+      "makespan": 13085.577,
+      "qtime_violations": 15072.159
+    },
+    "MIN_QTIME": {
+      "makespan": 12701.392,
+      "qtime_violations": 7337.848
+    },
+    "SPT": {
+      "makespan": 13160.467,
+      "qtime_violations": 29388.206
+    },
+    "SPTSSU": {
+      "makespan": 13002.829,
+      "qtime_violations": 50955.953
+    },
+    "random": {
+      "makespan": 13305.693,
+      "qtime_violations": 39401.379
+    }
+  }
+}

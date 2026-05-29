@@ -15,7 +15,12 @@ import pandas as pd
 
 from utils import EventLogger
 from simulation import Scheduler
-from simulation.priority import set_transition_risk_table, get_transition_risk_table
+from simulation.priority import (
+    set_transition_risk_table,
+    get_transition_risk_table,
+    SLOT_NAMES,
+    available_terms,
+)
 
 # transition 위험 테이블 캐시 파일.
 # evaluator init 시 자동 저장 → result.ipynb 등 외부 노트북이 로드해
@@ -67,7 +72,8 @@ class SAAEvaluator:
                  down_active=False,
                  pm_active=False,
                  mk_ref=None,
-                 qv_ref=None):
+                 qv_ref=None,
+                 term_bindings=None):
         """
         Args:
             data: DataLoader.load_all_data() 결과
@@ -80,6 +86,10 @@ class SAAEvaluator:
                 내부 _compute_reference()를 건너뛴다.
                 result_compare.ipynb가 6개 baseline rule × 30 run의 산술평균으로
                 산출해 data/normalization_ref.json에 저장한 값을 그대로 받기 위함.
+            term_bindings: COMPOSITE 슬롯 → 항 이름 dict. 예:
+                {'alpha':'PT', 'beta':'SLACK', 'gamma':'C_TRANSITION', 'delta':'WAITING'}
+                None이면 priority.py 기본값(PT/SLACK/C_TRANSITION/SETUP) 사용.
+                env var COMPOSITE_<SLOT>_TERM 으로 반영되어 _run_once에서 적용된다.
         """
         self.data = data
         self.pm_hazard_threshold = pm_hazard_threshold
@@ -98,6 +108,10 @@ class SAAEvaluator:
         os.environ['TIME_UNIT'] = 'M'
         self.down_active = down_active
         self.pm_active = pm_active
+
+        # 0) COMPOSITE 슬롯 → 항 이름 매핑 적용 (env var 경로로 priority가 읽음)
+        self.term_bindings = self._resolve_term_bindings(term_bindings)
+        self._apply_term_bindings(self.term_bindings)
 
         # 1) transition 위험 가중치 테이블을 baseline 측정으로 산출·주입
         self.transition_risk = self._compute_transition_risk()
@@ -122,6 +136,37 @@ class SAAEvaluator:
             self.mk_ref, self.qv_ref = self._compute_reference()
             self._ref_source = 'internal'
 
+    # ---- 슬롯-항 매핑 ----
+    _DEFAULT_BINDINGS = {
+        'alpha': 'PT',
+        'beta':  'SLACK',
+        'gamma': 'C_TRANSITION',
+        'delta': 'SETUP',
+    }
+
+    def _resolve_term_bindings(self, term_bindings):
+        """입력 dict를 검증 후 SLOT_NAMES 키로 정규화한다."""
+        merged = dict(self._DEFAULT_BINDINGS)
+        if term_bindings:
+            for slot, term in term_bindings.items():
+                slot_l = slot.lower()
+                if slot_l not in SLOT_NAMES:
+                    raise ValueError(
+                        f"알 수 없는 슬롯: {slot} (사용 가능: {SLOT_NAMES})"
+                    )
+                term_u = str(term).upper()
+                if term_u not in available_terms():
+                    raise ValueError(
+                        f"등록되지 않은 항: {term} (사용 가능: {available_terms()})"
+                    )
+                merged[slot_l] = term_u
+        return merged
+
+    def _apply_term_bindings(self, bindings):
+        """슬롯 → 항 이름을 환경변수에 반영해 priority.composite_select가 읽게 한다."""
+        for slot, term in bindings.items():
+            os.environ[f'COMPOSITE_{slot.upper()}_TERM'] = term
+
     # ---- 내부: 단일 시뮬레이션 ----
     def _run_once(self, job_rule, seed):
         """
@@ -132,6 +177,8 @@ class SAAEvaluator:
         env = simpy.Environment()
         logger = EventLogger(env)
         os.environ['JOB_RULE'] = job_rule
+        # 매 run마다 슬롯-항 매핑 재주입 (다른 코드가 env var를 덮어쓰는 경우 방어)
+        self._apply_term_bindings(self.term_bindings)
         scheduler = Scheduler(
             env=env, data=self.data, event_logger=logger,
             pm_hazard_threshold=self.pm_hazard_threshold,
@@ -283,4 +330,5 @@ class SAAEvaluator:
             'qv_ref': self.qv_ref,
             'obj_weights': (self.w1, self.w2),
             'transition_risk': dict(self.transition_risk),
+            'term_bindings': dict(self.term_bindings),
         }
