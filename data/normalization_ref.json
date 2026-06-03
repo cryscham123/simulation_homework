@@ -1,11 +1,14 @@
 {
-  "mk_ref": 12701.391538129681,
-  "qv_ref": 7337.847861398688,
+  "mk_ref": 12617.163401626902,
+  "qv_ref": 824.2480935806714,
   "mk_ref_rule": "MIN_QTIME",
-  "qv_ref_rule": "MIN_QTIME",
+  "qv_ref_rule": "SPTSSU",
+  "n_jobs": 60,
   "unit": "M",
+  "qv_ref_metric": "AQT",
+  "mk_ref_method": "utopia_min",
+  "qv_ref_method": "nadir_max",
   "source_time_unit": "H",
-  "method": "utopia_point",
   "n_runs": 30,
   "rules": [
     "random",
@@ -17,28 +20,34 @@
   ],
   "per_rule_mean": {
     "FIFO": {
-      "makespan": 12985.446,
-      "qtime_violations": 43340.983
+      "makespan": 12924.16,
+      "qtime_violations_total": 41608.711,
+      "aqt": 693.479
     },
     "LPT": {
-      "makespan": 13085.577,
-      "qtime_violations": 15072.159
+      "makespan": 12996.018,
+      "qtime_violations_total": 14604.396,
+      "aqt": 243.407
     },
     "MIN_QTIME": {
-      "makespan": 12701.392,
-      "qtime_violations": 7337.848
+      "makespan": 12617.163,
+      "qtime_violations_total": 6887.479,
+      "aqt": 114.791
     },
     "SPT": {
-      "makespan": 13160.467,
-      "qtime_violations": 29388.206
+      "makespan": 13152.249,
+      "qtime_violations_total": 27539.13,
+      "aqt": 458.985
     },
     "SPTSSU": {
-      "makespan": 13002.829,
-      "qtime_violations": 50955.953
+      "makespan": 13020.228,
+      "qtime_violations_total": 49454.886,
+      "aqt": 824.248
     },
     "random": {
-      "makespan": 13305.693,
-      "qtime_violations": 39401.379
+      "makespan": 13289.523,
+      "qtime_violations_total": 38699.965,
+      "aqt": 644.999
     }
   }
 }

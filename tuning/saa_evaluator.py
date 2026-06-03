@@ -3,8 +3,12 @@ SAA(Sample Average Approximation) 기반 COMPOSITE rule 파라미터 평가 모�
 
 목적:
   파라미터 벡터 w = (alpha, beta, gamma, delta)에 대해
-    J_hat(w) = (1/N) Σ_i [ w1 · Makespan_i(w)/mk_ref + w2 · QV_i(w)/qv_ref ]
+    J_hat(w) = (1/N) Σ_i [ w1 · Makespan_i(w)/mk_ref + w2 · AQT_i(w)/qv_ref ]
   를 추정한다.
+
+  AQT (Average Q-time violation per job) = QV_total / N_jobs.
+  N_jobs는 data['jobs']에서 얻는다.
+  mk_ref=qv_ref=1.0 으로 두면 정규화 없이 raw 1:1 가중합으로 동작한다.
 """
 import os
 import json
@@ -96,6 +100,10 @@ class SAAEvaluator:
         self.base_seed = base_seed
         self.w1, self.w2 = obj_weights
         self.n_ref = n_ref
+        # AQT 분모. job 수는 data schema에서 받아 고정 길이에 의존하지 않게 한다.
+        self.n_jobs = int(len(data['jobs']))
+        if self.n_jobs <= 0:
+            raise ValueError("data['jobs']가 비어 있어 AQT 분모를 만들 수 없다.")
 
         # DOWN/PM 활성 여부는 호출자가 결정한다(기본은 비활성으로 결정론 시나리오).
         # DOWN_ACTIVE=True면 Machine.down 프로세스가 활성화되어 같은 w에서도 seed별로
@@ -236,20 +244,11 @@ class SAAEvaluator:
 
     # ---- 목적함수 정규화 기준 ----
     def _compute_reference(self):
-        """
-        utopia-point 정규화: 각 metric별로 가장 유리한 단일 rule의 평균을 기준값으로 삼는다.
-          mk_ref = mean(makespan of SPTSSU runs)   # Makespan에 가장 유리한 rule
-          qv_ref = mean(QV       of MIN_QTIME runs) # QV에 가장 유리한 rule
-
-        의미: J=1.0이면 COMPOSITE가 두 metric 모두에서 단일 rule best와 동등.
-              J<1.0이면 COMPOSITE가 두 축의 utopia point보다 우월 (= trade-off에서 유의미한 개선).
-        qv_ref=0이면(위반 전무) 1.0으로 대체해 0 나눗셈을 막는다.
-        """
         seeds = self._seed_list(self.n_ref)
         mks = [_makespan(self._run_once('SPTSSU', s)) for s in seeds]
         qvs = [_qtime_violation(self._run_once('MIN_QTIME', s)) for s in seeds]
         mk_ref = float(np.mean(mks))
-        qv_ref = float(np.mean(qvs))
+        qv_ref = float(np.mean(qvs)) / self.n_jobs   # AQT 단위
         if qv_ref <= 0:
             qv_ref = 1.0
         return mk_ref, qv_ref
@@ -267,12 +266,9 @@ class SAAEvaluator:
 
     # ---- 목적함수 ----
     def _objective(self, makespan, qtime_violation):
-        """
-        단일 replication의 목적함수 값.
-        J_i = w1 · (Makespan/mk_ref) + w2 · (QV/qv_ref)
-        """
+        aqt = qtime_violation / self.n_jobs
         return (self.w1 * makespan / self.mk_ref
-                + self.w2 * qtime_violation / self.qv_ref)
+                + self.w2 * aqt / self.qv_ref)
 
     def _summarize(self, mks, qvs):
         """raw 결과 리스트 → J 통계 dict."""
@@ -284,7 +280,8 @@ class SAAEvaluator:
             'J_hat': float(js.mean()),
             'se': se,
             'makespan_mean': float(np.mean(mks)),
-            'qtime_violation_mean': float(np.mean(qvs)),
+            'qtime_violation_mean': float(np.mean(qvs)),  # 총합 QV (분)
+            'aqt_mean': float(np.mean(qvs) / self.n_jobs),  # job당 평균 (분)
             'J_samples': js,
             'n_runs': n,
         }
