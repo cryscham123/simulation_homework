@@ -200,14 +200,66 @@ def available_terms():
     return list(TERM_REGISTRY.keys())
 
 
+def _get_dynamic_terms_weights():
+    """
+    Dynamic 모드: env var 두 개에서 (terms, weights) 리스트를 읽는다.
+      COMPOSITE_TERMS    = 'PT,SLACK,SETUP,...'         (TERM_REGISTRY key)
+      COMPOSITE_WEIGHTS  = 'w1,w2,w3,...'               (실수, 길이 일치)
+
+    둘 다 비어 있으면 (None, None) → 호출자가 legacy 4슬롯 경로로 분기.
+    composite_rule.py 의 Shapley/PSO 가 4슬롯 제약을 우회하기 위해 사용한다.
+    """
+    raw_t = os.getenv('COMPOSITE_TERMS', '').strip()
+    raw_w = os.getenv('COMPOSITE_WEIGHTS', '').strip()
+    if not raw_t:
+        return None, None
+    terms = [t.strip().upper() for t in raw_t.split(',') if t.strip()]
+    if not terms:
+        return None, None
+    if raw_w:
+        weights = [float(x) for x in raw_w.split(',') if x.strip() != '']
+    else:
+        weights = [1.0] * len(terms)
+    if len(weights) != len(terms):
+        raise ValueError(
+            f"COMPOSITE_TERMS({len(terms)})와 COMPOSITE_WEIGHTS({len(weights)}) 길이 불일치"
+        )
+    return terms, weights
+
+
 def composite_select(candidates, machine):
     """
     COMPOSITE rule: candidate 중 priority score π가 최소인 job을 선택.
 
-    슬롯(α/β/γ/δ)별로 어떤 항을 끼울지는 환경변수
-      COMPOSITE_<SLOT>_TERM (값: TERM_REGISTRY key)
-    로 결정한다. 미설정이면 _DEFAULT_SLOT_TERMS에 따른다.
+    두 가지 모드:
+    1. **Dynamic** — env var `COMPOSITE_TERMS`, `COMPOSITE_WEIGHTS` 가 설정되면
+       가변 길이 (1..n) 항 집합으로 score = Σ w_i · norm(term_i). Shapley 분석에서
+       2^n-1 부분집합 (특히 |S|≥5) 을 다루기 위한 경로.
+    2. **Legacy 4슬롯** — env var 가 비어 있으면 기존 α/β/γ/δ 슬롯 + 슬롯별
+       COMPOSITE_<SLOT>_TERM 매핑 사용.
     """
+    dyn_terms, dyn_weights = _get_dynamic_terms_weights()
+
+    if dyn_terms is not None:
+        norm_per_term = []
+        for term_name in dyn_terms:
+            if term_name not in TERM_REGISTRY:
+                raise KeyError(
+                    f"COMPOSITE_TERMS 안의 '{term_name}' 은 등록된 항이 아니다. "
+                    f"사용 가능: {available_terms()}"
+                )
+            raw_fn, norm_kind = TERM_REGISTRY[term_name]
+            raw = raw_fn(candidates, machine)
+            norm_per_term.append(_NORMALIZERS[norm_kind](raw))
+
+        best_idx, best_score = 0, float('inf')
+        for i in range(len(candidates)):
+            score = sum(dyn_weights[k] * norm_per_term[k][i]
+                        for k in range(len(dyn_terms)))
+            if score < best_score:
+                best_idx, best_score = i, score
+        return candidates[best_idx]
+
     weights = _get_weights()
     slots = _get_slot_terms()
 
