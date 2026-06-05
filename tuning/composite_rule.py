@@ -301,13 +301,18 @@ def pso_simplex(eval_fn, dim,
 def value_function(evaluator, terms_S, n_runs, pso_kwargs):
     """v(S) = min_{w ∈ simplex(|S|)} J(w; S).
 
-    |S|=0 → 0   (Shapley baseline 관습)
+    |S|=0 → FIFO J (information-less baseline).
+            J=0 sentinel 을 쓰면 minimization 에서 v(∅) 가 글로벌 최적처럼
+            취급되어 모든 marginal 이 음수 편향되므로, 실제 "아무 우선순위
+            정보도 없는 dispatch" 대용으로 FIFO 의 SAA J 를 baseline 으로
+            사용한다. (동일 CRN seed.)
     |S|=1 → PSO 불필요 (w=1.0, scale-invariant)
     |S|≥2 → PSO inner-loop
     """
     k = len(terms_S)
     if k == 0:
-        return {'J*': 0.0, 'w*': np.array([])}
+        r = evaluator.evaluate_rule('FIFO', n_runs=n_runs)
+        return {'J*': r['J_hat'], 'w*': np.array([])}
     if k == 1:
         r = evaluator.evaluate(list(terms_S), [1.0], n_runs=n_runs)
         return {'J*': r['J_hat'], 'w*': np.array([1.0])}
@@ -329,12 +334,19 @@ def shapley_value(evaluator, candidate_terms,
                   pso_kwargs=None,
                   value_cache=None,
                   verbose=True):
-    """Exact Shapley value via 2^n 부분집합 평가 (v(∅)=0 포함).
+    """Exact Shapley value via 2^n 부분집합 평가.
+
+    Baseline 규약:
+        v(∅) = FIFO J (information-less dispatch). J=0 sentinel 은 minimization
+        에서 모든 marginal 을 음수로 끌어내려 φ 부호 해석을 깨므로, 실제로
+        "어떤 우선순위 항도 안 쓰는 dispatch" 에 해당하는 FIFO 의 SAA J 를
+        baseline 으로 사용한다.
 
     최소화 목적함수이므로 marginal contribution 부호 규약:
         Δ_t(S) := v(S) - v(S ∪ {t})    (t 가 들어가면 J 가 얼마나 감소했나)
         φ_t = Σ_{S ⊆ N\\{t}} (|S|! (n-|S|-1)! / n!) · Δ_t(S)
     → φ_t > 0  ⇔  t 가 평균적으로 J 를 줄인다 (= 유익).
+       (FIFO baseline 하에서 Σ φ_t = v(∅) - v(N) = J_FIFO - J_full > 0.)
 
     Args:
         evaluator: DynamicCompositeEvaluator
@@ -361,6 +373,13 @@ def shapley_value(evaluator, candidate_terms,
         print(f"⚠ n={n} 은 2^n={2**n} 부분집합 → 비용이 빠르게 커진다.")
 
     terms = list(candidate_terms)
+
+    # 구버전 (v(∅)=0 sentinel) 캐시 무효화 → FIFO baseline 으로 재평가 유도
+    _empty = frozenset()
+    if _empty in value_cache and value_cache[_empty].get('J*', None) == 0.0:
+        if verbose:
+            print("  [cache] 구버전 v(∅)=0 sentinel 감지 → FIFO baseline 으로 재평가")
+        del value_cache[_empty]
 
     all_subsets = [frozenset()]
     for k in range(1, n + 1):
