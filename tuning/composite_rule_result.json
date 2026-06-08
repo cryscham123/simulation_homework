@@ -9,18 +9,18 @@
   ],
   "top_k_terms": [
     "SLACK",
-    "COMPLETION_FAST",
-    "SETUP"
+    "SETUP",
+    "COMPLETION_FAST"
   ],
   "w_star": {
-    "SLACK": 0.42646299385228476,
-    "COMPLETION_FAST": 0.14340345429674703,
-    "SETUP": 0.4301335518509682
+    "SLACK": 0.47465050606436576,
+    "SETUP": 0.2610972984549748,
+    "COMPLETION_FAST": 0.2642521954806594
   },
-  "J_in_sample": 0.9111713549795846,
-  "J_held_out": 0.9112894164761658,
-  "J_held_out_se": 0.01117456708910047,
-  "bias_estimate": -0.00011806149658122322,
+  "J_in_sample": 0.8935988242485473,
+  "J_held_out": 0.9178519381919567,
+  "J_held_out_se": 0.010016555378732033,
+  "bias_estimate": -0.024253113943409343,
   "shapley_phi": {
     "PT": 0.01911681432389422,
     "SLACK": 0.26121836114957986,
@@ -70,49 +70,49 @@
   "baseline_ttest": [
     {
       "baseline": "SPTSSU",
-      "mean_diff (COMP - base)": -0.710167,
-      "t": -53.35818,
+      "mean_diff (COMP - base)": -0.699991,
+      "t": -52.077586,
       "p_one_sided": 0.0,
       "holm_threshold": 0.008333,
       "reject_H0 (COMP<base 유의)": true
     },
     {
       "baseline": "FIFO",
-      "mean_diff (COMP - base)": -0.569374,
-      "t": -36.592806,
+      "mean_diff (COMP - base)": -0.559197,
+      "t": -37.224839,
       "p_one_sided": 0.0,
       "holm_threshold": 0.01,
       "reject_H0 (COMP<base 유의)": true
     },
     {
       "baseline": "random",
-      "mean_diff (COMP - base)": -0.516019,
-      "t": -25.221908,
+      "mean_diff (COMP - base)": -0.505842,
+      "t": -24.353673,
       "p_one_sided": 0.0,
       "holm_threshold": 0.0125,
       "reject_H0 (COMP<base 유의)": true
     },
     {
       "baseline": "LPT",
-      "mean_diff (COMP - base)": -0.203162,
-      "t": -21.462796,
+      "mean_diff (COMP - base)": -0.192985,
+      "t": -20.683085,
       "p_one_sided": 0.0,
       "holm_threshold": 0.016667,
       "reject_H0 (COMP<base 유의)": true
     },
     {
       "baseline": "SPT",
-      "mean_diff (COMP - base)": -0.401544,
-      "t": -20.808414,
+      "mean_diff (COMP - base)": -0.391367,
+      "t": -20.040382,
       "p_one_sided": 0.0,
       "holm_threshold": 0.025,
       "reject_H0 (COMP<base 유의)": true
     },
     {
       "baseline": "MIN_QTIME",
-      "mean_diff (COMP - base)": -0.046875,
-      "t": -5.900827,
-      "p_one_sided": 1e-06,
+      "mean_diff (COMP - base)": -0.036698,
+      "t": -5.633062,
+      "p_one_sided": 2e-06,
       "holm_threshold": 0.05,
       "reject_H0 (COMP<base 유의)": true
     }
@@ -120,8 +120,8 @@
   "summary_J": [
     {
       "rule": "COMPOSITE",
-      "J_mean": 0.90954,
-      "J_se": 0.01276
+      "J_mean": 0.91972,
+      "J_se": 0.01284
     },
     {
       "rule": "MIN_QTIME",
