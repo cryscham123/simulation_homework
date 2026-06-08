@@ -10,43 +10,41 @@
   "top_k_terms": [
     "SLACK",
     "COMPLETION_FAST",
-    "SETUP",
-    "C_TRANSITION"
+    "SETUP"
   ],
   "w_star": {
-    "SLACK": 0.4726359939942542,
-    "COMPLETION_FAST": 0.26494033013360674,
-    "SETUP": 0.262423675872139,
-    "C_TRANSITION": 0.0
+    "SLACK": 0.42646299385228476,
+    "COMPLETION_FAST": 0.14340345429674703,
+    "SETUP": 0.4301335518509682
   },
-  "J_in_sample": 0.8938325989499825,
-  "J_held_out": 0.9168741895680602,
-  "J_held_out_se": 0.009953200822271057,
-  "bias_estimate": -0.023041590618077756,
+  "J_in_sample": 0.9111713549795846,
+  "J_held_out": 0.9112894164761658,
+  "J_held_out_se": 0.01117456708910047,
+  "bias_estimate": -0.00011806149658122322,
   "shapley_phi": {
-    "PT": 0.016328582953234555,
-    "SLACK": 0.2494524393827878,
-    "SETUP": 0.11087970570134265,
-    "C_TRANSITION": 0.03040600477459508,
-    "COMPLETION_FAST": 0.1258194592329402,
-    "WAITING": -0.0022939797495407158
+    "PT": 0.01911681432389422,
+    "SLACK": 0.26121836114957986,
+    "SETUP": 0.10223704698950455,
+    "C_TRANSITION": 0.02712660739880291,
+    "COMPLETION_FAST": 0.14477268869588522,
+    "WAITING": 0.004484589841311222
   },
   "pairwise_interaction": {
-    "PT|SLACK": 0.07064918641410999,
-    "PT|SETUP": -0.008890245691343703,
-    "PT|C_TRANSITION": -0.05286083739706448,
-    "PT|COMPLETION_FAST": 0.0908625536151981,
-    "PT|WAITING": -0.023249155427627226,
-    "SLACK|SETUP": 0.06886764521565,
-    "SLACK|C_TRANSITION": -0.011761877849766206,
-    "SLACK|COMPLETION_FAST": 0.25352833582634876,
-    "SLACK|WAITING": 0.0425694097162381,
-    "SETUP|C_TRANSITION": -0.037063277036210165,
-    "SETUP|COMPLETION_FAST": 0.06069009754791156,
-    "SETUP|WAITING": -0.007841564256942945,
-    "C_TRANSITION|COMPLETION_FAST": -0.0007476185564669786,
-    "C_TRANSITION|WAITING": -0.010156003853896197,
-    "COMPLETION_FAST|WAITING": 0.002533426185305202
+    "PT|SLACK": 0.07968440986400571,
+    "PT|SETUP": 0.029944537849614823,
+    "PT|C_TRANSITION": -0.02232562788225594,
+    "PT|COMPLETION_FAST": 0.08664093710087963,
+    "PT|WAITING": -0.007541901724462912,
+    "SLACK|SETUP": 0.07963116654562079,
+    "SLACK|C_TRANSITION": -0.012584168992820995,
+    "SLACK|COMPLETION_FAST": 0.2517125754453096,
+    "SLACK|WAITING": 0.007287293077756053,
+    "SETUP|C_TRANSITION": -0.02649200485562952,
+    "SETUP|COMPLETION_FAST": 0.08135920327957548,
+    "SETUP|WAITING": 0.011730036410665588,
+    "C_TRANSITION|COMPLETION_FAST": -0.013316244542536902,
+    "C_TRANSITION|WAITING": -0.005713091008712654,
+    "COMPLETION_FAST|WAITING": -0.01337282407304826
   },
   "config": {
     "mk_ref": 14734.157948534785,
@@ -72,49 +70,49 @@
   "baseline_ttest": [
     {
       "baseline": "SPTSSU",
-      "mean_diff (COMP - base)": -0.699885,
-      "t": -52.238893,
+      "mean_diff (COMP - base)": -0.710167,
+      "t": -53.35818,
       "p_one_sided": 0.0,
       "holm_threshold": 0.008333,
       "reject_H0 (COMP<base 유의)": true
     },
     {
       "baseline": "FIFO",
-      "mean_diff (COMP - base)": -0.559092,
-      "t": -37.250831,
+      "mean_diff (COMP - base)": -0.569374,
+      "t": -36.592806,
       "p_one_sided": 0.0,
       "holm_threshold": 0.01,
       "reject_H0 (COMP<base 유의)": true
     },
     {
       "baseline": "random",
-      "mean_diff (COMP - base)": -0.505737,
-      "t": -24.359581,
+      "mean_diff (COMP - base)": -0.516019,
+      "t": -25.221908,
       "p_one_sided": 0.0,
       "holm_threshold": 0.0125,
       "reject_H0 (COMP<base 유의)": true
     },
     {
       "baseline": "LPT",
-      "mean_diff (COMP - base)": -0.19288,
-      "t": -20.601328,
+      "mean_diff (COMP - base)": -0.203162,
+      "t": -21.462796,
       "p_one_sided": 0.0,
       "holm_threshold": 0.016667,
       "reject_H0 (COMP<base 유의)": true
     },
     {
       "baseline": "SPT",
-      "mean_diff (COMP - base)": -0.391262,
-      "t": -20.165138,
+      "mean_diff (COMP - base)": -0.401544,
+      "t": -20.808414,
       "p_one_sided": 0.0,
       "holm_threshold": 0.025,
       "reject_H0 (COMP<base 유의)": true
     },
     {
       "baseline": "MIN_QTIME",
-      "mean_diff (COMP - base)": -0.036593,
-      "t": -5.582845,
-      "p_one_sided": 3e-06,
+      "mean_diff (COMP - base)": -0.046875,
+      "t": -5.900827,
+      "p_one_sided": 1e-06,
       "holm_threshold": 0.05,
       "reject_H0 (COMP<base 유의)": true
     }
@@ -122,8 +120,8 @@
   "summary_J": [
     {
       "rule": "COMPOSITE",
-      "J_mean": 0.91983,
-      "J_se": 0.01282
+      "J_mean": 0.90954,
+      "J_se": 0.01276
     },
     {
       "rule": "MIN_QTIME",
