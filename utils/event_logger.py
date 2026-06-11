@@ -33,16 +33,17 @@ class EventLogger:
     def log_event_start(self, 
                         id: str, 
                         event: str, 
-                        resource: str, 
+                        resource: str,
                         op_id: Optional[int] = None,
-                        description: Optional[str] = None):
+                        description: Optional[str] = None,
+                        at: Optional[float] = None):
         self.__logs.append({
             'id': id,
             'event': event,
             'op_id': op_id,
             'description': description,
             'resource': resource,
-            'start': self.__env.now
+            'start': self.__env.now if at is None else at
         })
         return len(self.__logs) - 1
 

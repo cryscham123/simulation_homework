@@ -76,7 +76,7 @@ class Scheduler:
                 env=env,
                 id=machine_id,
                 group=machine_group,
-                failure_info=failsure_info,
+                failure_info=failure_info,
                 setup_time_info=setup_time_info,
                 process_time_info=process_time_info,
                 pm_hazard_threshold=machine_threshold,
