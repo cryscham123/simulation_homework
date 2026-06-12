@@ -98,9 +98,7 @@ BOOST_COOLDOWN=20
 simpy/
 ├── algorithms/
 │   └── genetic/              # GA 인코딩, 디코딩, 평가, 연산자, 실행 로직
-├── data/
-│   └── large_data/           # 시뮬레이션 입력 CSV
-├── reports/                  # 최종 보고서 및 보고서 이미지
+├── reports/                  # 최종 보고서
 ├── simulation/
 │   ├── job.py                # Job 상태 및 operation 흐름
 │   ├── machine.py            # Machine 상태, 고장, PM, 작업 처리
