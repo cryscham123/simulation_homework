@@ -21,18 +21,18 @@
   \coordinate[left=1.75cm of brk1] (failhub);
   \coordinate (stockerReturn) at (failhub |- stk.west);
   \draw[->] (start)--(stk);
-  \draw[->] (stk)-- node[right,font=\scriptsize]{machine available} (assign);
+  \draw[->] (stk)-- node[right,font=\small]{machine available} (assign);
   \draw[->] (assign)--(setup);
   \draw[->] (setup)--(brk1);
-  \draw[->] (brk1)-- node[right,font=\scriptsize]{no} (proc);
+  \draw[->] (brk1)-- node[right,font=\small]{no} (proc);
   \draw[->] (proc)--(brk2);
-  \draw[->] (brk2)-- node[right,font=\scriptsize]{no (operation complete)} (more);
-  \draw[->] (more)-- node[right,font=\scriptsize]{no} (done);
-  \draw[crepair,thick] (brk1.west) -- node[above,font=\scriptsize]{yes} (failhub);
-  \draw[crepair,thick] (brk2.west) -| node[below,font=\scriptsize,pos=0.2]{yes} (failhub);
+  \draw[->] (brk2)-- node[right,font=\small]{no (operation complete)} (more);
+  \draw[->] (more)-- node[right,font=\small]{no} (done);
+  \draw[crepair,thick] (brk1.west) -- node[above,font=\small]{yes} (failhub);
+  \draw[crepair,thick] (brk2.west) -| node[below,font=\small,pos=0.2]{yes} (failhub);
   \draw[->,crepair,thick] (failhub)
-    -- node[left,font=\scriptsize,align=center,pos=0.55]{return to stocker\\(same op)} (stockerReturn)
+    -- node[left,font=\small,align=center,pos=0.55]{return to stocker\\(same op)} (stockerReturn)
     -- (stk.west);
-  \draw[->] (more.east) -- ++(2.7,0) |- node[right,font=\scriptsize,pos=0.25]{yes (next op)} (stk.east);
+  \draw[->] (more.east) -- ++(2.7,0) |- node[right,font=\small,pos=0.25]{yes (next op)} (stk.east);
 \end{tikzpicture}
 \end{document}
