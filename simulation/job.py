@@ -47,6 +47,7 @@ class Job:
         self.operation_end_signal = simpy.Store(env)
         self.__qtime_chk_start = 0.0
         self.__waited_time = 0.0
+        self.__work_start = 0.0
         self.cur_state = Job.State.UNRELEASED
         self.__is_qtime_over = False
         # WAITING 진입 시각. priority._waiting_time(A-2)가 candidate 변별용으로 사용.
@@ -121,11 +122,18 @@ class Job:
         try:
             if not self.__is_qtime_over:
                 self.__qtime_chk_start = self.__env.now
-                yield self.__env.timeout(self.__qtime[self.__cur_seq] - self.__waited_time)
+                remaining = self.__qtime[self.__cur_seq] - self.__waited_time
+                if remaining <= 0:
+                    self.__qtime_event_idx = self.__event_logger.log_event_start(
+                        self.id, 'qtime_over', 'job', self.get_current_operation(), None,
+                        at=self.__qtime_chk_start + remaining)
+                    self.__is_qtime_over = True
+                    return
+                yield self.__env.timeout(remaining)
                 self.__qtime_event_idx = self.__event_logger.log_event_start(self.id, 'qtime_over', 'job', self.get_current_operation(), None)
                 self.__is_qtime_over = True
         except simpy.Interrupt:
-            self.__waited_time = self.__env.now - self.__qtime_chk_start
+            self.__waited_time += self.__env.now - self.__qtime_chk_start
 
     def start_qtime_chk(self):
         """
@@ -164,6 +172,8 @@ class Job:
 
     def set_state(self, state: State):
         self.cur_state = state
+        if state == Job.State.WORKING:
+            self.__work_start = self.__env.now
         self.__event_logger.log_event_finish(self.__cur_event_idx)
         self.__cur_event_idx = self.__event_logger.log_event_start(self.id, 
                                                                    'setup' if state == Job.State.SETUP else 'working', 
@@ -183,6 +193,11 @@ class Job:
             self.__cur_event_idx = self.__event_logger.log_event_start(self.id,
                                                                        f'waiting-{self.__job_type}',
                                                                        'job', self.get_current_operation(), None)
-        self.__is_qtime_over &= (not is_completed)
-        self.__waited_time *= int(not is_completed)
+        if is_completed:
+            self.__is_qtime_over = False
+            self.__waited_time = 0.0
+        elif not self.prev_not_completed:
+            # working 중 고장(setup 통과 후): 멈춰 있던 qtime 예산에 실패 process 경과시간을 적산
+            # setup 중 고장(prev_not_completed=True)이면 qtime 타이머가 계속 돌고 있어 별도 charge 불필요.
+            self.__waited_time += self.__env.now - self.__work_start
         self.__event_queue.put(self)

@@ -242,13 +242,24 @@ def single_term_screening(evaluator, candidate_terms, n_runs=10, verbose=True):
 def pso_simplex(eval_fn, dim,
                 swarm_size=8, n_iter=8,
                 w_inertia=0.7, c_cog=1.5, c_soc=1.5,
-                seed=0, verbose=False):
+                seed=0, verbose=False, n_jobs=1):
     """sum=1 simplex 위의 minimize PSO.
 
     각 particle 위치 x ∈ R^dim, 평가 시 x/sum(x) 로 정규화 (scale-invariance).
     초기 위치 = Dirichlet(1,...,1) 균등 simplex 샘플.
 
     예산: (swarm_size) × (n_iter + 1) 회 eval_fn 호출.
+
+    병렬화 (n_jobs):
+        PSO 는 iteration 간 순차(다음 iter 가 직전 gbest 필요)지만, **한 iteration
+        안의 swarm 입자들은 서로 독립**이라 병렬 평가 가능하다.
+        - n_jobs=1 (기본): 순차 (로컬/재현용).
+        - n_jobs>1     : joblib loky **프로세스** 병렬. eval_fn 안에서 os.environ
+                         (COMPOSITE_TERMS/WEIGHTS, JOB_RULE)을 전역 설정하므로
+                         스레드가 아닌 프로세스여야 race 가 없다. seed 는 eval_fn
+                         내부에서 매 호출 재설정되므로 결과는 순차와 동일(결정론적).
+        - n_jobs=-1    : 가용 코어 전부.
+        권장: n_jobs = swarm_size → 한 iteration 의 모든 입자가 1 wave 로 끝난다.
 
     Returns:
         dict {'w*', 'J*', 'history'}
@@ -257,11 +268,22 @@ def pso_simplex(eval_fn, dim,
         raise ValueError("dim must be >= 1")
     rng = np.random.default_rng(seed)
 
+    # 입자 집단 평가기 (n_jobs!=1 이면 프로세스 병렬)
+    if n_jobs is not None and n_jobs != 1:
+        from joblib import Parallel, delayed
+        _parallel = Parallel(n_jobs=n_jobs, backend='loky')
+
+        def _eval_pop(P):
+            return np.array(_parallel(delayed(eval_fn)(p) for p in P), dtype=float)
+    else:
+        def _eval_pop(P):
+            return np.array([eval_fn(p) for p in P], dtype=float)
+
     pos = rng.dirichlet(np.ones(dim), size=swarm_size)
     vel = np.zeros_like(pos)
 
     p_best_pos = pos.copy()
-    p_best_J = np.array([eval_fn(p) for p in pos])
+    p_best_J = _eval_pop(pos)
 
     g_idx = int(np.argmin(p_best_J))
     g_best_pos = p_best_pos[g_idx].copy()
@@ -281,7 +303,7 @@ def pso_simplex(eval_fn, dim,
         sums[sums < 1e-12] = 1.0
         pos = pos / sums
 
-        Js = np.array([eval_fn(p) for p in pos])
+        Js = _eval_pop(pos)
         improved = Js < p_best_J
         p_best_pos[improved] = pos[improved]
         p_best_J[improved] = Js[improved]
