@@ -1,8 +1,8 @@
 {
-  "mk_ref": 14734.157948534785,
-  "qv_ref": 68400.2858359913,
+  "mk_ref": 14515.052531407146,
+  "qv_ref": 69320.32060119283,
   "mk_ref_rule": "random",
-  "mk_ref_try": 26,
+  "mk_ref_try": 22,
   "qv_ref_rule": "SPTSSU",
   "qv_ref_try": 24,
   "n_jobs": 60,
@@ -23,34 +23,34 @@
   ],
   "per_rule_mean": {
     "FIFO": {
-      "makespan": 12848.441,
-      "qtime_violations_total": 41554.013,
-      "aqt": 692.567
+      "makespan": 12883.901,
+      "qtime_violations_total": 41984.913,
+      "aqt": 699.749
     },
     "LPT": {
-      "makespan": 13076.415,
-      "qtime_violations_total": 14931.637,
-      "aqt": 248.861
+      "makespan": 13134.071,
+      "qtime_violations_total": 15387.099,
+      "aqt": 256.452
     },
     "MIN_QTIME": {
-      "makespan": 12561.559,
-      "qtime_violations_total": 6577.181,
-      "aqt": 109.62
+      "makespan": 12669.033,
+      "qtime_violations_total": 7008.027,
+      "aqt": 116.8
     },
     "SPT": {
-      "makespan": 13049.757,
-      "qtime_violations_total": 29425.496,
-      "aqt": 490.425
+      "makespan": 13016.635,
+      "qtime_violations_total": 29968.56,
+      "aqt": 499.476
     },
     "SPTSSU": {
-      "makespan": 12994.979,
-      "qtime_violations_total": 50739.637,
-      "aqt": 845.661
+      "makespan": 12946.435,
+      "qtime_violations_total": 51065.239,
+      "aqt": 851.087
     },
     "random": {
-      "makespan": 13305.727,
-      "qtime_violations_total": 36488.645,
-      "aqt": 608.144
+      "makespan": 13337.754,
+      "qtime_violations_total": 36938.976,
+      "aqt": 615.65
     }
   }
 }

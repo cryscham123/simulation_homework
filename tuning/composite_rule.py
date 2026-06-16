@@ -320,6 +320,89 @@ def pso_simplex(eval_fn, dim,
     return {'w*': g_best_pos, 'J*': g_best_J, 'history': history}
 
 
+def pso_box(eval_fn, bounds,
+            swarm_size=8, n_iter=8,
+            w_inertia=0.7, c_cog=1.5, c_soc=1.5,
+            seed=0, verbose=False, n_jobs=1):
+    """박스 제약(lo ≤ x ≤ hi) 위의 minimize PSO.
+
+    pso_simplex 와 **동일한 구조·병렬화**를 쓰되, simplex 정규화(sum=1) 대신
+    차원별 박스 clip 을 적용한다. PM threshold 처럼 합=1 제약이 없는 연속
+    스칼라/저차원 파라미터 튜닝용 (dim=1 이면 스칼라 튜닝).
+
+    Args:
+        eval_fn: x(np.ndarray, shape=(dim,)) → float (minimize 대상).
+        bounds : [(lo, hi), ...] 길이 = dim. 각 차원의 탐색 범위.
+        나머지 PSO 하이퍼파라미터 / 병렬화(n_jobs) 는 pso_simplex 와 동일 규약.
+
+    초기 위치 = U(lo, hi), 속도는 ±|hi-lo| 로 clamp (발산 방지).
+
+    예산: swarm_size × (n_iter + 1) 회 eval_fn 호출.
+
+    Returns:
+        dict {'x*', 'J*', 'history'}
+    """
+    lo = np.asarray([b[0] for b in bounds], dtype=float)
+    hi = np.asarray([b[1] for b in bounds], dtype=float)
+    dim = len(bounds)
+    if dim <= 0:
+        raise ValueError("bounds 가 비어 있다")
+    if np.any(hi <= lo):
+        raise ValueError(f"각 차원에서 hi>lo 여야 한다: lo={lo}, hi={hi}")
+    rng = np.random.default_rng(seed)
+    span = hi - lo
+    v_max = span  # 속도 clamp 폭
+
+    # 입자 집단 평가기 (n_jobs!=1 이면 프로세스 병렬 — pso_simplex 와 동일)
+    if n_jobs is not None and n_jobs != 1:
+        from joblib import Parallel, delayed
+        _parallel = Parallel(n_jobs=n_jobs, backend='loky')
+
+        def _eval_pop(P):
+            return np.array(_parallel(delayed(eval_fn)(p) for p in P), dtype=float)
+    else:
+        def _eval_pop(P):
+            return np.array([eval_fn(p) for p in P], dtype=float)
+
+    pos = lo + rng.random((swarm_size, dim)) * span
+    vel = np.zeros_like(pos)
+
+    p_best_pos = pos.copy()
+    p_best_J = _eval_pop(pos)
+
+    g_idx = int(np.argmin(p_best_J))
+    g_best_pos = p_best_pos[g_idx].copy()
+    g_best_J = float(p_best_J[g_idx])
+
+    history = [(0, g_best_J)]
+
+    for it in range(1, n_iter + 1):
+        r1 = rng.random((swarm_size, dim))
+        r2 = rng.random((swarm_size, dim))
+        vel = (w_inertia * vel
+               + c_cog * r1 * (p_best_pos - pos)
+               + c_soc * r2 * (g_best_pos - pos))
+        vel = np.clip(vel, -v_max, v_max)
+        pos = np.clip(pos + vel, lo, hi)
+
+        Js = _eval_pop(pos)
+        improved = Js < p_best_J
+        p_best_pos[improved] = pos[improved]
+        p_best_J[improved] = Js[improved]
+
+        g_idx = int(np.argmin(p_best_J))
+        if p_best_J[g_idx] < g_best_J:
+            g_best_pos = p_best_pos[g_idx].copy()
+            g_best_J = float(p_best_J[g_idx])
+
+        history.append((it, g_best_J))
+        if verbose:
+            xs = ", ".join(f"{v:.4f}" for v in g_best_pos)
+            print(f"    PSO iter {it}/{n_iter}  g*={g_best_J:.5f}  x*=[{xs}]")
+
+    return {'x*': g_best_pos, 'J*': g_best_J, 'history': history}
+
+
 def value_function(evaluator, terms_S, n_runs, pso_kwargs):
     """v(S) = min_{w ∈ simplex(|S|)} J(w; S).
 
