@@ -34,7 +34,7 @@ def _worker_evaluate(chromo: Chromosome) -> Tuple[float, float]:
 
 
 class GA:
-    """단일 목적 GA. fitness = makespan + alpha * qtime_violation 최소화."""
+    """단일 목적 GA. fitness = makespan/mk_ref + alpha * AQV/qv_ref 최소화 (정규화)."""
 
     def __init__(self,
                  encoded: EncodedData,
@@ -48,6 +48,8 @@ class GA:
                  tournament_k: int,
                  n_elites: int,
                  alpha: float,
+                 mk_ref: float,
+                 qv_ref: float,
                  seed: int,
                  stagnation_patience: int = 10,
                  mutation_boost: float = 8.0,
@@ -69,6 +71,9 @@ class GA:
         self.tournament_k = tournament_k
         self.n_elites = n_elites
         self.alpha = alpha
+        # ref를 GA 내부 단위(시간 + job당 평균)로 변환해서 보관
+        self.mk_ref = mk_ref / 60.0                          # 분 → 시간
+        self.qv_ref = qv_ref / len(data['jobs']) / 60.0      # total 분 → job당 평균 시간
         self.stagnation_patience = stagnation_patience
         self.mutation_boost = mutation_boost
         self.immigrant_ratio = immigrant_ratio
@@ -80,9 +85,9 @@ class GA:
         random.seed(seed)
 
     def fitness_value(self, chromo: Chromosome) -> float:
-        """Weighted sum 평가값. 작을수록 좋음."""
+        """정규화 weighted sum. 작을수록 좋음."""
         makespan, qtime = chromo.fitness
-        return makespan + self.alpha * qtime
+        return makespan / self.mk_ref + self.alpha * (qtime / self.qv_ref)
 
     def run(self) -> Tuple[Chromosome, List[Dict[str, Any]]]:
         """GA 실행. (best_chromosome, history) 반환."""

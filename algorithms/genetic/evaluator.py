@@ -52,10 +52,12 @@ class Evaluator:
         # makespan: 마지막 job 종료 시점
         makespan = float(job_info['finish'].max())
 
-        # qtime_violation: 모든 qtime_over 이벤트의 duration 합계
+        # qtime_violation: 모든 qtime_over duration 합계를 전체 job 수로 나눈 평균
         job_info['duration'] = job_info['finish'] - job_info['start']
-        qtime_violation = float(
+        total_violation = float(
             job_info.loc[job_info['event'] == 'qtime_over', 'duration'].sum()
         )
+        n_jobs = len(self.data['jobs'])
+        qtime_violation = total_violation / n_jobs
 
         return makespan, qtime_violation
