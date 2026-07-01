@@ -1,0 +1,56 @@
+{
+  "mk_ref": 14515.052531407146,
+  "qv_ref": 69320.32060119283,
+  "mk_ref_rule": "random",
+  "mk_ref_try": 22,
+  "qv_ref_rule": "SPTSSU",
+  "qv_ref_try": 24,
+  "n_jobs": 60,
+  "unit": "M",
+  "qv_ref_metric": "QV_total",
+  "mk_ref_method": "observed_max",
+  "qv_ref_method": "observed_max",
+  "source_time_unit": "H",
+  "seed_base": 0,
+  "n_runs": 30,
+  "rules": [
+    "random",
+    "FIFO",
+    "SPT",
+    "LPT",
+    "MIN_QTIME",
+    "SPTSSU"
+  ],
+  "per_rule_mean": {
+    "FIFO": {
+      "makespan": 12883.901,
+      "qtime_violations_total": 41984.913,
+      "aqt": 699.749
+    },
+    "LPT": {
+      "makespan": 13134.071,
+      "qtime_violations_total": 15387.099,
+      "aqt": 256.452
+    },
+    "MIN_QTIME": {
+      "makespan": 12669.033,
+      "qtime_violations_total": 7008.027,
+      "aqt": 116.8
+    },
+    "SPT": {
+      "makespan": 13016.635,
+      "qtime_violations_total": 29968.56,
+      "aqt": 499.476
+    },
+    "SPTSSU": {
+      "makespan": 12946.435,
+      "qtime_violations_total": 51065.239,
+      "aqt": 851.087
+    },
+    "random": {
+      "makespan": 13337.754,
+      "qtime_violations_total": 36938.976,
+      "aqt": 615.65
+    }
+  }
+}

@@ -7,6 +7,7 @@ from typing import Dict, Any
 from utils import EventLogger
 from enum import Enum
 from .job import Job
+from .pm_policy import calculate_pm_time
 import os
 
 class Machine:
@@ -118,33 +119,22 @@ class Machine:
         self.__event_queue.put(self)
 
     def __calculate_PM_time(self):
-    
+        """
+        PM 발동 시각 계산. 실제 rule별 로직은 simulation.pm_policy에 위임한다.
+        """
         if os.getenv('PM_ACTIVE', 'True').lower() == 'false':
             return inf
+        rule = os.getenv('PM_RULE', 'THRESHOLD')
+        return calculate_pm_time(
+            rule,
+            self.__shape,
+            self.__scale,
+            self.__repair_time,
+            self.__pm_duration,
+            self.__pm_hazard_threshold,
+            group=self.group,
+        )
 
-    # MTTF 기반 PM rule
-        if self.__pm_rule == "MTTF":
-            if self.__pm_interval is None:
-                return inf
-            if self.__pm_interval <= 0:
-                return 0.0
-            return self.__pm_interval
-
-    # 기존 threshold 기반 PM rule
-        k = self.__shape
-        lam = self.__scale
-        thr = self.__pm_hazard_threshold
-
-        if k <= 0 or lam <= 0:
-            return inf
-        if thr is None:
-            return inf
-        if thr <= 0:
-            return 0.0
-        if thr >= 1:
-            return inf
-
-        return lam * ((-math.log(1.0 - thr)) ** (1.0 / k))
     def PM(self):
         """예방 보전 프로세스"""
         try:
@@ -267,7 +257,7 @@ class Machine:
                 self.cur_state = Machine.State.WORKING
                 job.set_state(Job.State.WORKING)
                 self.__event_idx = self.__event_logger.log_event_start(self.__id, 
-                                                                       f'working-{job.id}', 
+                                                                       f'working-{job.id}',
                                                                        'machine', op_id,
                                                                        f'job: {job.id}\noperation: {op_id}')
                 yield self.__env.timeout(self.get_process_time(op_id))

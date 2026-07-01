@@ -1,4 +1,5 @@
 from .job import Job
+from .priority import composite_select
 import simpy
 import os
 import random
@@ -55,6 +56,8 @@ class Stocker():
         """
         JOB_RULE에 따라 stocker의 candidates 중 하나의 job을 선택
         """
+        if rule == 'COMPOSITE':
+            return composite_select(candidates, machine)
         if rule == 'random':
             return random.choice(candidates)
         if rule == 'FIFO':
