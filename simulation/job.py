@@ -50,6 +50,9 @@ class Job:
         self.__work_start = 0.0
         self.cur_state = Job.State.UNRELEASED
         self.__is_qtime_over = False
+        # WAITING 진입 시각. priority._waiting_time(A-2)가 candidate 변별용으로 사용.
+        # 아직 RELEASED 전이면 None → priority에서 0으로 취급.
+        self.__wait_start_time = None
 
         self.prev_not_completed = False
 
@@ -74,6 +77,11 @@ class Job:
         return self.__cur_seq
 
     @property
+    def total_ops(self):
+        """이 job의 총 operation 수. priority.COMPLETION_* 항이 사용."""
+        return len(self.__op_seq)
+
+    @property
     def priority(self):
         return self.__priority
 
@@ -82,6 +90,30 @@ class Job:
         현재 operation에 대한 그룹 정보 반환
         """
         return self.__op_group[self.__cur_seq][0]
+
+    def get_next_transition(self):
+        """
+        '현재 op_group -> 다음 op_group' 문자열을 반환한다 (예: 'G1->G3').
+        다음 op이 없으면 None.
+        priority._transition_risk에서 c_transition 항 산출에 사용한다.
+        """
+        nxt = self.__cur_seq + 1
+        if nxt >= len(self.__op_group):
+            return None
+        return f"{self.__op_group[self.__cur_seq][0]}->{self.__op_group[nxt][0]}"
+
+    def get_waiting_time(self):
+        """
+        현재 WAITING 상태에 머무른 시간 (env.now - 마지막 WAITING 진입 시각).
+
+        같은 op_group candidate라도 stocker에 도착한 시점이 달라
+        대기 누적이 달라지므로 candidate 내 variance가 자연스럽게 보장된다.
+        priority._waiting_time에서 α 항(A-2: FIFO 일관성)으로 사용한다.
+        아직 WAITING에 진입하지 않은 상태면 0.0.
+        """
+        if self.__wait_start_time is None:
+            return 0.0
+        return self.__env.now - self.__wait_start_time
 
     def __chk_qtime(self):
         """
@@ -132,8 +164,9 @@ class Job:
     def release(self):
         yield self.__env.timeout(self.__release_time)
         self.cur_state = self.State.RELEASED
-        self.__cur_event_idx = self.__event_logger.log_event_start(self.id, 
-                                                                   'waiting', 
+        self.__wait_start_time = self.__env.now
+        self.__cur_event_idx = self.__event_logger.log_event_start(self.id,
+                                                                   'waiting',
                                                                    'job', self.get_current_operation(), None)
         self.__event_queue.put(self)
 
@@ -156,8 +189,9 @@ class Job:
             self.__qtime_event_idx = -1
         else:
             self.cur_state = self.State.WAITING
-            self.__cur_event_idx = self.__event_logger.log_event_start(self.id, 
-                                                                       f'waiting', 
+            self.__wait_start_time = self.__env.now
+            self.__cur_event_idx = self.__event_logger.log_event_start(self.id,
+                                                                       f'waiting',
                                                                        'job', self.get_current_operation(), None)
         if is_completed:
             self.__is_qtime_over = False

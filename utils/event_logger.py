@@ -30,9 +30,9 @@ class EventLogger:
             for log in self.__logs
         ]
 
-    def log_event_start(self, 
-                        id: str, 
-                        event: str, 
+    def log_event_start(self,
+                        id: str,
+                        event: str,
                         resource: str,
                         op_id: Optional[int] = None,
                         description: Optional[str] = None,
